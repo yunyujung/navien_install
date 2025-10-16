@@ -9,7 +9,7 @@ from datetime import date
 from typing import List, Tuple, Optional
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps
 
 # ReportLab
 from reportlab.lib.pagesizes import A4
@@ -20,7 +20,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 # ────────────────────────────────────────────────
-# 페이지 설정 (제목 변경 반영)
+# 페이지 설정 (제목 반영)
 # ────────────────────────────────────────────────
 st.set_page_config(
     page_title="경동나비엔 가스보일러 설치/교체현장 제출 서류 양식",
@@ -28,24 +28,38 @@ st.set_page_config(
 )
 
 # ────────────────────────────────────────────────
-# 폰트 등록
+# 폰트 등록 (한글 깨짐 방지)
 # ────────────────────────────────────────────────
-def try_register_font() -> str:
+def try_register_font() -> Tuple[str, bool]:
+    """
+    사용 가능 폰트 등록 후 (font_name, is_custom) 반환
+    is_custom: True면 한글 TTF 임베드 성공, False면 Helvetica 대체
+    """
     candidates = [
-        ("NanumGothic", "NanumGothic.ttf"),
-        ("MalgunGothic", "C:\\Windows\\Fonts\\malgun.ttf"),
-        ("MalgunGothic", "C:/Windows/Fonts/malgun.ttf"),
+        ("NanumGothic", "NanumGothic.ttf"),                       # 실행 폴더 최우선
+        ("MalgunGothic", "C:\\Windows\\Fonts\\malgun.ttf"),       # 윈도우 경로 1
+        ("MalgunGothic", "C:/Windows/Fonts/malgun.ttf"),          # 윈도우 경로 2
     ]
     for family, path in candidates:
         try:
             if os.path.exists(path):
                 pdfmetrics.registerFont(TTFont(family, path))
-                return family
+                # 본문/볼드/이탤릭 등 패밀리 매핑(볼드/이탤릭 없으면 동일 폰트로 매핑)
+                from reportlab.pdfbase.ttfonts import TTFont
+                try:
+                    pdfmetrics.registerFont(TTFont(f"{family}-Bold", path))
+                    pdfmetrics.registerFont(TTFont(f"{family}-Italic", path))
+                    pdfmetrics.registerFont(TTFont(f"{family}-BoldItalic", path))
+                except Exception:
+                    pass
+                return family, True
         except Exception:
             pass
-    return "Helvetica"
+    return "Helvetica", False
 
-BASE_FONT = try_register_font()
+BASE_FONT, FONT_OK = try_register_font()
+if not FONT_OK:
+    st.warning("⚠️ 한글 폰트를 임베드하지 못했습니다. 실행 폴더에 `NanumGothic.ttf`를 두면 PDF 한글이 깨지지 않습니다.")
 
 ss = getSampleStyleSheet()
 styles = {
@@ -91,7 +105,7 @@ def validate_capacity(s: str) -> bool:
     return bool(re.search(r"\d", s))
 
 def _pick_image(file_uploader, camera_input) -> Optional[Image.Image]:
-    # 우선순위: 촬영 > 앨범선택 (원하시면 반대로 바꿔도 됩니다)
+    # 우선순위: 촬영 > 앨범선택
     if camera_input is not None:
         return Image.open(camera_input).convert("RGB")
     if file_uploader is not None:
@@ -116,19 +130,51 @@ def _pil_to_bytesio(img: Image.Image, quality=85) -> io.BytesIO:
     buf.seek(0)
     return buf
 
+def enforce_aspect_pad(img: Image.Image, target_ratio: float = 4/3) -> Image.Image:
+    """
+    이미지의 비율을 target_ratio(기본 4:3)에 맞추기 위해 여백(PAD)을 추가.
+    중앙 정렬, 배경은 흰색.
+    """
+    w, h = img.size
+    cur_ratio = w / h
+    if abs(cur_ratio - target_ratio) < 1e-3:
+        return img
+
+    # 새 캔버스 크기 계산 (둘 중 큰 쪽을 확장)
+    if cur_ratio > target_ratio:
+        # 가로가 더 길다 -> 세로 확장
+        new_h = int(round(w / target_ratio))
+        new_w = w
+    else:
+        # 세로가 더 길다 -> 가로 확장
+        new_w = int(round(h * target_ratio))
+        new_h = h
+
+    canvas = Image.new("RGB", (new_w, new_h), (255, 255, 255))
+    paste_x = (new_w - w) // 2
+    paste_y = (new_h - h) // 2
+    canvas.paste(img, (paste_x, paste_y))
+    return canvas
+
 # ────────────────────────────────────────────────
-# PDF 빌더 (제목/8컷 4x2 레이아웃)
+# PDF 빌더 (제목/8컷 4x2 레이아웃, 1페이지 고정)
 # ────────────────────────────────────────────────
 def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]) -> bytes:
     buf = io.BytesIO()
+    # A4: 595 x 842 pt
+    PAGE_W, PAGE_H = A4
+    LEFT_RIGHT_MARGIN = 20
+    TOP_BOTTOM_MARGIN = 20
+
     doc = SimpleDocTemplate(
-        buf, pagesize=A4, topMargin=20, bottomMargin=20,
-        leftMargin=20, rightMargin=20,
+        buf, pagesize=A4,
+        topMargin=TOP_BOTTOM_MARGIN, bottomMargin=TOP_BOTTOM_MARGIN,
+        leftMargin=LEFT_RIGHT_MARGIN, rightMargin=LEFT_RIGHT_MARGIN,
         title="경동나비엔 가스보일러 설치/교체현장 제출 서류 양식"
     )
     story = []
 
-    # 제목 (변경)
+    # 제목
     story.append(Paragraph("경동나비엔 가스보일러 설치/교체현장 제출 서류 양식", styles["title"]))
     story.append(Spacer(1, 4))
 
@@ -142,7 +188,7 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
         [Paragraph("시공자 (이름/전화번호)", styles["cell"]), Paragraph(meta["installer"], styles["cell"])],
         [Paragraph("시공연월일", styles["cell"]), Paragraph(meta["date"], styles["cell"])],
     ]
-    meta_tbl = Table(meta_rows, colWidths=[85, 420])
+    meta_tbl = Table(meta_rows, colWidths=[85, PAGE_W - 2*LEFT_RIGHT_MARGIN - 85])
     meta_tbl.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.9, colors.black),
         ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.grey),
@@ -155,53 +201,84 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
     story.append(meta_tbl)
     story.append(Spacer(1, 8))
 
-    # 사진 그리드 4x2 (총 8컷)
-    PAGE_W, _ = A4
+    # ── 사진 그리드 4x2 (총 8컷), 1페이지 고정 레이아웃 ──
     col_count = 4
-    gap_total = 6 * (col_count - 1)  # 약간의 컬럼 간격 6pt
-    col_width = (PAGE_W - 40 - gap_total) / col_count
+    # 표 전체 폭: 페이지 폭 - 좌우 마진
+    usable_width = PAGE_W - 2*LEFT_RIGHT_MARGIN
+    gap_total = 6 * (col_count - 1)  # 컬럼 간격(테이블 내부 패딩으로 대체, 실제 gap 없이 colWidth만 주어도 안정)
+    col_width = (usable_width - gap_total) / col_count
+
+    # 1페이지에 안정적으로 들어가도록 행 높이/캡션 높이 지정
+    ROW_HEIGHT = 240   # 각 행 총 높이
+    CAPTION_HEIGHT = 24
+    IMAGE_MAX_H = ROW_HEIGHT - CAPTION_HEIGHT - 8  # 상하 패딩 감안
+    IMAGE_MAX_W = col_width - 8
 
     cells = []
     for title, pil_img in titled_images:
-        if pil_img is None:
+        if pil_img is not None:
+            # 4:3 비율 맞추기(패딩), 리사이즈
+            pil_img = enforce_aspect_pad(pil_img, 4/3)
+            img_resized = _resize_for_pdf(pil_img, max_px=1400)
+            bio = _pil_to_bytesio(img_resized, quality=85)
+
+            # RLImage 생성 후 4:3 유지한 채 셀 안으로 맞추기
+            # 4:3 기준 크기 계산
+            # (우선 가로 기준으로 맞추고, 높이를 초과하면 높이 기준으로 재조정)
+            target_w = IMAGE_MAX_W
+            target_h = target_w * 3 / 4  # 4:3
+            if target_h > IMAGE_MAX_H:
+                target_h = IMAGE_MAX_H
+                target_w = target_h * 4 / 3
+
+            rl_img = RLImage(bio, width=target_w, height=target_h)
+            rl_img.hAlign = "CENTER"
+
             cell = Table(
-                [[Paragraph("(사진 없음)", styles["small_center"])],
+                [[rl_img],
                  [Paragraph(title, styles["small_center"])]],
-                colWidths=[col_width]
+                colWidths=[col_width],
+                rowHeights=[ROW_HEIGHT - CAPTION_HEIGHT, CAPTION_HEIGHT]
             )
             cell.setStyle(TableStyle([
                 ("BOX", (0,0), (-1,-1), 0.3, colors.grey),
-                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("VALIGN", (0,0), (-1,0), "MIDDLE"),
                 ("ALIGN", (0,0), (-1,-1), "CENTER"),
-                ("TOPPADDING", (0,0), (-1,-1), 6),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+                ("TOPPADDING", (0,0), (-1,0), 2),
+                ("BOTTOMPADDING", (0,0), (-1,0), 2),
+                ("TOPPADDING", (0,1), (-1,1), 0),
+                ("BOTTOMPADDING", (0,1), (-1,1), 0),
             ]))
         else:
-            img_resized = _resize_for_pdf(pil_img, max_px=1400)
-            bio = _pil_to_bytesio(img_resized, quality=85)
-            rl_img = RLImage(bio, width=col_width-8)
-            rl_img.hAlign = "CENTER"
-            cell = Table([[rl_img], [Paragraph(title, styles["small_center"])]], colWidths=[col_width])
+            cell = Table(
+                [[Paragraph("(사진 없음)", styles["small_center"])],
+                 [Paragraph(title, styles["small_center"])]],
+                colWidths=[col_width],
+                rowHeights=[ROW_HEIGHT - CAPTION_HEIGHT, CAPTION_HEIGHT]
+            )
             cell.setStyle(TableStyle([
                 ("BOX", (0,0), (-1,-1), 0.3, colors.grey),
-                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("VALIGN", (0,0), (-1,0), "MIDDLE"),
                 ("ALIGN", (0,0), (-1,-1), "CENTER"),
-                ("TOPPADDING", (0,0), (-1,-1), 4),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
             ]))
         cells.append(cell)
 
-    # 8장 고정 (4x2)
+    # 부족하면 공백 셀 채우기
     while len(cells) < 8:
-        cells.append(Table(
-            [[Paragraph("(사진 없음)", styles["small_center"])],
-             [Paragraph("추가 사진", styles["small_center"])]],
-            colWidths=[col_width]
-        ))
+        cells.append(
+            Table(
+                [[Paragraph("(사진 없음)", styles["small_center"])],
+                 [Paragraph("추가 사진", styles["small_center"])]],
+                colWidths=[col_width],
+                rowHeights=[ROW_HEIGHT - CAPTION_HEIGHT, CAPTION_HEIGHT]
+            )
+        )
 
     grid_rows = [cells[0:4], cells[4:8]]
     grid_tbl = Table(
-        grid_rows, colWidths=[col_width]*4,
+        grid_rows,
+        colWidths=[col_width]*4,
+        rowHeights=[ROW_HEIGHT, ROW_HEIGHT],
         hAlign="CENTER", spaceBefore=0, spaceAfter=0
     )
     grid_tbl.setStyle(TableStyle([
@@ -213,6 +290,7 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
     ]))
     story.append(grid_tbl)
 
+    # 1페이지 내에 수렴하도록 상단 요소 크기를 튜닝했으므로 추가 제약 없이 build
     doc.build(story)
     return buf.getvalue()
 
@@ -220,7 +298,7 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
 # UI
 # ────────────────────────────────────────────────
 st.markdown("### 경동나비엔 가스보일러 설치/교체현장 제출 서류 양식")
-st.info("모바일에서는 각 항목에서 **촬영(카메라 사용)** 또는 **사진/갤러리 선택**으로 업로드 가능합니다.")
+st.info("모바일에서는 각 항목에서 **촬영(카메라 사용)** 또는 **사진/갤러리 선택**으로 업로드 가능합니다. 모든 사진은 4:3 비율로 자동 보정됩니다.")
 
 # 세션 상태
 if "meta_locked" not in st.session_state:
@@ -294,7 +372,7 @@ if unlock:
     st.info("기본정보를 다시 수정할 수 있습니다.")
 
 # ────────────────────────────────────────────────
-# 현장 사진 섹션 (문구/항목 변경, 8개 고정)
+# 현장 사진 섹션 (8개 고정, 4:3 자동 보정)
 # ────────────────────────────────────────────────
 st.markdown("#### 현장 사진")
 
@@ -309,7 +387,6 @@ photo_labels = [
     "8. 기타",
 ]
 
-# 4열 x 2행로 화면 배치(표기는 '현장 사진'만, 3x2 문구 노출 없음)
 uploads = []
 for row_idx in range(2):
     cols = st.columns(4)
@@ -332,6 +409,9 @@ if submitted:
             images: List[Tuple[str, Optional[Image.Image]]] = []
             for (fu, cam), label in zip(uploads, photo_labels):
                 pil_img = _pick_image(fu, cam)
+                if pil_img is not None:
+                    # 4:3 비율로 패딩 보정
+                    pil_img = enforce_aspect_pad(pil_img, 4/3)
                 images.append((label, pil_img))
 
             md = st.session_state.meta_data
@@ -361,8 +441,9 @@ if submitted:
 with st.expander("도움말 / 안내"):
     st.markdown(
         """
-- **촬영이 안 뜨면**: 브라우저 *카메라 권한*을 허용해 주세요.
-- **한글이 깨질 때**: 실행 폴더에 `NanumGothic.ttf`를 두거나(권장), 윈도우는 자동으로 `맑은 고딕`을 시도합니다.
+- **촬영 버튼이 안 보이면**: 브라우저 *카메라 권한*을 허용해 주세요.
+- **한글이 깨질 때**: 실행 폴더에 `NanumGothic.ttf`를 두면 PDF에 폰트가 임베드되어 해결됩니다(윈도우는 자동으로 `맑은 고딕` 시도).
+- **사진 비율**: 모든 사진은 자동으로 **4:3 비율(패딩 방식)** 로 맞춰집니다.
 - **사진 권장 크기**: 1~3MB 내외 (앱에서 자동 리사이즈/압축)
 - **전화번호**: 자동으로 `010-1234-5678` 형식으로 정리됩니다.
         """
