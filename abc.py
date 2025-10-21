@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
 # KD Navien 설치/교체현장 제출 서류 양식 (단일 페이지) 생성 앱 - 8컷(4x2) 사진 버전
+# 요청 반영:
+# - 항목명 변경(현장명→설치장소(주소), 설치모델→모델명, 용량→최대가스소비량(kcal/h),
+#   설치대리점→설치업체명, 시공자 전화번호→시공자 연락처)
+# - 사진 캡션(8개) 더 크고 굵게, 섹션 제목과 동일 폰트 계열
+# - PDF 한글 폰트 완전 임베드(나눔고딕/맑은고딕 정/볼드 자동 탐지)
 
 import io
 import os
@@ -9,7 +14,7 @@ from datetime import date
 from typing import List, Tuple, Optional
 
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image
 
 # ReportLab
 from reportlab.lib.pagesizes import A4
@@ -18,9 +23,10 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
 # ────────────────────────────────────────────────
-# 페이지 설정 (제목 반영)
+# 페이지 설정
 # ────────────────────────────────────────────────
 st.set_page_config(
     page_title="경동나비엔 가스보일러 설치/교체현장 제출 서류 양식",
@@ -28,51 +34,90 @@ st.set_page_config(
 )
 
 # ────────────────────────────────────────────────
-# 폰트 등록 (한글 깨짐 방지)
+# 폰트 등록 (한글 완전 임베드)
 # ────────────────────────────────────────────────
-def try_register_font() -> Tuple[str, bool]:
+def try_register_font_family() -> Tuple[str, bool]:
     """
-    사용 가능 폰트 등록 후 (font_name, is_custom) 반환
-    is_custom: True면 한글 TTF 임베드 성공, False면 Helvetica 대체
+    사용 가능 폰트(Regular/Bold) 등록 후 (base_family, ok) 반환.
+    ok=True면 정/볼드 임베드 완료(한글 절대 안 깨짐), False면 Helvetica 대체.
     """
+    # 1) 실행 폴더(나눔고딕 권장)
+    nanum_regular = os.path.join(os.getcwd(), "NanumGothic.ttf")
+    nanum_bold    = os.path.join(os.getcwd(), "NanumGothicBold.ttf")
+
+    # 2) 윈도우(맑은고딕)
+    malgun_regular = r"C:\Windows\Fonts\malgun.ttf"
+    malgun_bold    = r"C:\Windows\Fonts\malgunbd.ttf"
+
     candidates = [
-        ("NanumGothic", "NanumGothic.ttf"),                       # 실행 폴더 최우선
-        ("MalgunGothic", "C:\\Windows\\Fonts\\malgun.ttf"),       # 윈도우 경로 1
-        ("MalgunGothic", "C:/Windows/Fonts/malgun.ttf"),          # 윈도우 경로 2
+        ("NanumGothic", nanum_regular, nanum_bold),
+        ("MalgunGothic", malgun_regular, malgun_bold),
     ]
-    for family, path in candidates:
+
+    for family, reg, bold in candidates:
         try:
-            if os.path.exists(path):
-                pdfmetrics.registerFont(TTFont(family, path))
-                # 본문/볼드/이탤릭 등 패밀리 매핑(볼드/이탤릭 없으면 동일 폰트로 매핑)
-                from reportlab.pdfbase.ttfonts import TTFont
-                try:
-                    pdfmetrics.registerFont(TTFont(f"{family}-Bold", path))
-                    pdfmetrics.registerFont(TTFont(f"{family}-Italic", path))
-                    pdfmetrics.registerFont(TTFont(f"{family}-BoldItalic", path))
-                except Exception:
-                    pass
+            if os.path.exists(reg):
+                pdfmetrics.registerFont(TTFont(f"{family}-Regular", reg))
+                reg_ok = True
+            else:
+                reg_ok = False
+            if os.path.exists(bold):
+                pdfmetrics.registerFont(TTFont(f"{family}-Bold", bold))
+                bold_ok = True
+            else:
+                bold_ok = False
+
+            if reg_ok:
+                # Regular는 반드시 있어야 함. Bold가 없으면 Regular로 폴백
+                if not bold_ok:
+                    pdfmetrics.registerFont(TTFont(f"{family}-Bold", reg))
+                # 패밀리 매핑 등록(이탤릭은 동일 폴백)
+                registerFontFamily(
+                    family,
+                    normal=f"{family}-Regular",
+                    bold=f"{family}-Bold",
+                    italic=f"{family}-Regular",
+                    boldItalic=f"{family}-Bold",
+                )
                 return family, True
         except Exception:
             pass
+
+    # 폴백(경고)
+    registerFontFamily(
+        "Helvetica",
+        normal="Helvetica",
+        bold="Helvetica-Bold",
+        italic="Helvetica-Oblique",
+        boldItalic="Helvetica-BoldOblique",
+    )
     return "Helvetica", False
 
-BASE_FONT, FONT_OK = try_register_font()
-if not FONT_OK:
-    st.warning("⚠️ 한글 폰트를 임베드하지 못했습니다. 실행 폴더에 `NanumGothic.ttf`를 두면 PDF 한글이 깨지지 않습니다.")
+BASE_FAMILY, FONT_EMBED_OK = try_register_font_family()
+if not FONT_EMBED_OK:
+    st.warning(
+        "⚠️ PDF에 한글 폰트가 완전 임베드되지 않았습니다. "
+        "앱 실행 폴더에 `NanumGothic.ttf`와 `NanumGothicBold.ttf`를 넣어 주세요 "
+        "(또는 Windows의 `malgun.ttf`, `malgunbd.ttf`가 필요)."
+    )
 
 ss = getSampleStyleSheet()
 styles = {
     "title": ParagraphStyle(
-        name="title", parent=ss["Heading1"], fontName=BASE_FONT,
+        name="title", parent=ss["Heading1"], fontName=BASE_FAMILY,
         fontSize=16, leading=20, alignment=1, spaceAfter=8
     ),
     "cell": ParagraphStyle(
-        name="cell", parent=ss["Normal"], fontName=BASE_FONT,
+        name="cell", parent=ss["Normal"], fontName=BASE_FAMILY,
         fontSize=9, leading=12
     ),
+    "photo_caption": ParagraphStyle(
+        # 사진 캡션: 더 크고 굵게(섹션 제목과 동일 폰트 패밀리)
+        name="photo_caption", parent=ss["Normal"], fontName=f"{BASE_FAMILY}-Bold",
+        fontSize=10.5, leading=13, alignment=1
+    ),
     "small_center": ParagraphStyle(
-        name="small_center", parent=ss["Normal"], fontName=BASE_FONT,
+        name="small_center", parent=ss["Normal"], fontName=BASE_FAMILY,
         fontSize=8, leading=11, alignment=1
     ),
 }
@@ -101,7 +146,7 @@ def format_kr_phone(s: str) -> str:
         return f"{area}-{rest[:-4]}-{rest[-4:]}"
     return s
 
-def validate_capacity(s: str) -> bool:
+def validate_has_digit(s: str) -> bool:
     return bool(re.search(r"\d", s))
 
 def _pick_image(file_uploader, camera_input) -> Optional[Image.Image]:
@@ -131,25 +176,16 @@ def _pil_to_bytesio(img: Image.Image, quality=85) -> io.BytesIO:
     return buf
 
 def enforce_aspect_pad(img: Image.Image, target_ratio: float = 4/3) -> Image.Image:
-    """
-    이미지의 비율을 target_ratio(기본 4:3)에 맞추기 위해 여백(PAD)을 추가.
-    중앙 정렬, 배경은 흰색.
-    """
     w, h = img.size
     cur_ratio = w / h
     if abs(cur_ratio - target_ratio) < 1e-3:
         return img
-
-    # 새 캔버스 크기 계산 (둘 중 큰 쪽을 확장)
     if cur_ratio > target_ratio:
-        # 가로가 더 길다 -> 세로 확장
         new_h = int(round(w / target_ratio))
         new_w = w
     else:
-        # 세로가 더 길다 -> 가로 확장
         new_w = int(round(h * target_ratio))
         new_h = h
-
     canvas = Image.new("RGB", (new_w, new_h), (255, 255, 255))
     paste_x = (new_w - w) // 2
     paste_y = (new_h - h) // 2
@@ -157,11 +193,10 @@ def enforce_aspect_pad(img: Image.Image, target_ratio: float = 4/3) -> Image.Ima
     return canvas
 
 # ────────────────────────────────────────────────
-# PDF 빌더 (제목/8컷 4x2 레이아웃, 1페이지 고정)
+# PDF 빌더 (1페이지, 8컷 4x2)
 # ────────────────────────────────────────────────
 def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]) -> bytes:
     buf = io.BytesIO()
-    # A4: 595 x 842 pt
     PAGE_W, PAGE_H = A4
     LEFT_RIGHT_MARGIN = 20
     TOP_BOTTOM_MARGIN = 20
@@ -178,17 +213,18 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
     story.append(Paragraph("경동나비엔 가스보일러 설치/교체현장 제출 서류 양식", styles["title"]))
     story.append(Spacer(1, 4))
 
-    # 메타 정보 표
+    # 메타 정보 표 (요청 명칭 반영)
+    # 왼쪽 라벨/오른쪽 값
     meta_rows = [
-        [Paragraph("현장명", styles["cell"]), Paragraph(meta["site"], styles["cell"])],
-        [Paragraph("설치모델", styles["cell"]), Paragraph(meta["model"], styles["cell"])],
-        [Paragraph("용량 (kcal/h, kg/h)", styles["cell"]), Paragraph(meta["capacity"], styles["cell"])],
+        [Paragraph("설치장소(주소)", styles["cell"]), Paragraph(meta["site_addr"], styles["cell"])],
+        [Paragraph("모델명", styles["cell"]), Paragraph(meta["model_name"], styles["cell"])],
+        [Paragraph("최대가스소비량(kcal/h)", styles["cell"]), Paragraph(meta["max_gas"], styles["cell"])],
         [Paragraph("급배기방식", styles["cell"]), Paragraph(meta["flue"], styles["cell"])],
-        [Paragraph("설치대리점", styles["cell"]), Paragraph(meta["dealer"], styles["cell"])],
-        [Paragraph("시공자 (이름/전화번호)", styles["cell"]), Paragraph(meta["installer"], styles["cell"])],
+        [Paragraph("설치업체명", styles["cell"]), Paragraph(meta["installer_company"], styles["cell"])],
+        [Paragraph("시공자 (이름/연락처)", styles["cell"]), Paragraph(meta["installer"], styles["cell"])],
         [Paragraph("시공연월일", styles["cell"]), Paragraph(meta["date"], styles["cell"])],
     ]
-    meta_tbl = Table(meta_rows, colWidths=[85, PAGE_W - 2*LEFT_RIGHT_MARGIN - 85])
+    meta_tbl = Table(meta_rows, colWidths=[105, PAGE_W - 2*LEFT_RIGHT_MARGIN - 105])
     meta_tbl.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.9, colors.black),
         ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.grey),
@@ -201,32 +237,27 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
     story.append(meta_tbl)
     story.append(Spacer(1, 8))
 
-    # ── 사진 그리드 4x2 (총 8컷), 1페이지 고정 레이아웃 ──
+    # 사진 그리드 4x2
     col_count = 4
-    # 표 전체 폭: 페이지 폭 - 좌우 마진
     usable_width = PAGE_W - 2*LEFT_RIGHT_MARGIN
-    gap_total = 6 * (col_count - 1)  # 컬럼 간격(테이블 내부 패딩으로 대체, 실제 gap 없이 colWidth만 주어도 안정)
+    gap_total = 6 * (col_count - 1)
     col_width = (usable_width - gap_total) / col_count
 
-    # 1페이지에 안정적으로 들어가도록 행 높이/캡션 높이 지정
-    ROW_HEIGHT = 240   # 각 행 총 높이
-    CAPTION_HEIGHT = 24
-    IMAGE_MAX_H = ROW_HEIGHT - CAPTION_HEIGHT - 8  # 상하 패딩 감안
+    ROW_HEIGHT = 240
+    CAPTION_HEIGHT = 28  # 캡션 공간 약간 더 확보(글씨 키워서)
+    IMAGE_MAX_H = ROW_HEIGHT - CAPTION_HEIGHT - 8
     IMAGE_MAX_W = col_width - 8
 
     cells = []
     for title, pil_img in titled_images:
         if pil_img is not None:
-            # 4:3 비율 맞추기(패딩), 리사이즈
             pil_img = enforce_aspect_pad(pil_img, 4/3)
             img_resized = _resize_for_pdf(pil_img, max_px=1400)
             bio = _pil_to_bytesio(img_resized, quality=85)
 
-            # RLImage 생성 후 4:3 유지한 채 셀 안으로 맞추기
-            # 4:3 기준 크기 계산
-            # (우선 가로 기준으로 맞추고, 높이를 초과하면 높이 기준으로 재조정)
+            # 4:3 크기 계산
             target_w = IMAGE_MAX_W
-            target_h = target_w * 3 / 4  # 4:3
+            target_h = target_w * 3 / 4
             if target_h > IMAGE_MAX_H:
                 target_h = IMAGE_MAX_H
                 target_w = target_h * 4 / 3
@@ -236,7 +267,7 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
 
             cell = Table(
                 [[rl_img],
-                 [Paragraph(title, styles["small_center"])]],
+                 [Paragraph(title, styles["photo_caption"])]],  # 굵고 크게
                 colWidths=[col_width],
                 rowHeights=[ROW_HEIGHT - CAPTION_HEIGHT, CAPTION_HEIGHT]
             )
@@ -252,7 +283,7 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
         else:
             cell = Table(
                 [[Paragraph("(사진 없음)", styles["small_center"])],
-                 [Paragraph(title, styles["small_center"])]],
+                 [Paragraph(title, styles["photo_caption"])]],  # 굵고 크게
                 colWidths=[col_width],
                 rowHeights=[ROW_HEIGHT - CAPTION_HEIGHT, CAPTION_HEIGHT]
             )
@@ -263,12 +294,11 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
             ]))
         cells.append(cell)
 
-    # 부족하면 공백 셀 채우기
     while len(cells) < 8:
         cells.append(
             Table(
                 [[Paragraph("(사진 없음)", styles["small_center"])],
-                 [Paragraph("추가 사진", styles["small_center"])]],
+                 [Paragraph("추가 사진", styles["photo_caption"])]],
                 colWidths=[col_width],
                 rowHeights=[ROW_HEIGHT - CAPTION_HEIGHT, CAPTION_HEIGHT]
             )
@@ -290,7 +320,6 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
     ]))
     story.append(grid_tbl)
 
-    # 1페이지 내에 수렴하도록 상단 요소 크기를 튜닝했으므로 추가 제약 없이 build
     doc.build(story)
     return buf.getvalue()
 
@@ -306,14 +335,14 @@ if "meta_locked" not in st.session_state:
 if "meta_data" not in st.session_state:
     st.session_state.meta_data = {}
 
-# 메타정보 폼
+# 메타정보 폼 (필드명 변경 반영)
 with st.form("meta_form_v2", clear_on_submit=False):
     disabled = st.session_state.meta_locked
     colA, colB = st.columns(2)
     with colA:
-        site = st.text_input("현장명", value=st.session_state.meta_data.get("site",""), disabled=disabled)
-        model = st.text_input("설치모델", value=st.session_state.meta_data.get("model",""), disabled=disabled)
-        capacity = st.text_input("용량 (kcal/h, kg/h)", value=st.session_state.meta_data.get("capacity",""), disabled=disabled)
+        site_addr = st.text_input("설치장소(주소)", value=st.session_state.meta_data.get("site_addr",""), disabled=disabled)
+        model_name = st.text_input("모델명", value=st.session_state.meta_data.get("model_name",""), disabled=disabled)
+        max_gas = st.text_input("최대가스소비량(kcal/h)", value=st.session_state.meta_data.get("max_gas",""), disabled=disabled)
         flue = st.selectbox(
             "급배기방식", ["FF", "FE"],
             index=(["FF","FE"].index(st.session_state.meta_data.get("flue","FF"))
@@ -321,9 +350,9 @@ with st.form("meta_form_v2", clear_on_submit=False):
             disabled=disabled
         )
     with colB:
-        dealer = st.text_input("설치대리점", value=st.session_state.meta_data.get("dealer",""), disabled=disabled)
+        installer_company = st.text_input("설치업체명", value=st.session_state.meta_data.get("installer_company",""), disabled=disabled)
         installer_name = st.text_input("시공자 이름", value=st.session_state.meta_data.get("installer_name",""), disabled=disabled)
-        installer_phone = st.text_input("시공자 전화번호", value=st.session_state.meta_data.get("installer_phone",""), disabled=disabled)
+        installer_phone = st.text_input("시공자 연락처", value=st.session_state.meta_data.get("installer_phone",""), disabled=disabled)
         work_date = st.date_input("시공연월일", value=st.session_state.meta_data.get("work_date", date.today()), format="YYYY-MM-DD", disabled=disabled)
 
     c1, c2 = st.columns([1,1])
@@ -338,28 +367,28 @@ if submitted_meta:
 
     missing = []
     checks = [
-        ("현장명", site.strip()),
-        ("설치모델", model.strip()),
-        ("용량", capacity.strip()),
-        ("설치대리점", dealer.strip()),
+        ("설치장소(주소)", site_addr.strip()),
+        ("모델명", model_name.strip()),
+        ("최대가스소비량(kcal/h)", max_gas.strip()),
+        ("설치업체명", installer_company.strip()),
         ("시공자 이름", installer_name.strip()),
-        ("시공자 전화번호", installer_phone_fmt.strip()),
+        ("시공자 연락처", installer_phone_fmt.strip()),
     ]
     for k, v in checks:
         if not v:
             missing.append(k)
-    if not validate_capacity(capacity):
-        missing.append("용량(숫자 포함)")
+    if not validate_has_digit(max_gas):
+        missing.append("최대가스소비량(숫자 포함)")
 
     if missing:
         st.error("필수 항목 누락: " + ", ".join(missing))
     else:
         st.session_state.meta_data = {
-            "site": site.strip(),
-            "model": model.strip(),
-            "capacity": capacity.strip(),
+            "site_addr": site_addr.strip(),
+            "model_name": model_name.strip(),
+            "max_gas": max_gas.strip(),
             "flue": flue,
-            "dealer": dealer.strip(),
+            "installer_company": installer_company.strip(),
             "installer_name": installer_name.strip(),
             "installer_phone": installer_phone_fmt,
             "work_date": work_date,
@@ -367,7 +396,7 @@ if submitted_meta:
         st.session_state.meta_locked = True
         st.success("기본정보를 저장했고 입력칸을 잠갔습니다. 필요하면 '🔓 기본정보 수정'을 눌러 변경하세요.")
 
-if unlock:
+if "unlock" in locals() and unlock:
     st.session_state.meta_locked = False
     st.info("기본정보를 다시 수정할 수 있습니다.")
 
@@ -378,8 +407,8 @@ st.markdown("#### 현장 사진")
 
 photo_labels = [
     "1. 가스보일러 전면사진",
-    "2. 배기통 (실내)",
-    "3. 배기통 (실외)",
+    "2. 배기통(실내)",
+    "3. 배기통(실외)",
     "4. 일산화탄소 경보기",
     "5. 시공표지판",
     "6. 명판",
@@ -410,23 +439,22 @@ if submitted:
             for (fu, cam), label in zip(uploads, photo_labels):
                 pil_img = _pick_image(fu, cam)
                 if pil_img is not None:
-                    # 4:3 비율로 패딩 보정
                     pil_img = enforce_aspect_pad(pil_img, 4/3)
                 images.append((label, pil_img))
 
             md = st.session_state.meta_data
             meta = {
-                "site": md["site"],
-                "model": md["model"],
-                "capacity": md["capacity"],
+                "site_addr": md["site_addr"],
+                "model_name": md["model_name"],
+                "max_gas": md["max_gas"],
                 "flue": md["flue"],
-                "dealer": md["dealer"],
+                "installer_company": md["installer_company"],
                 "installer": f"{md['installer_name']} / {md['installer_phone']}",
                 "date": str(md["work_date"]),
             }
 
             pdf_bytes = build_pdf(meta, images)
-            safe_site = sanitize_filename(meta['site'])
+            safe_site = sanitize_filename(md['site_addr'])
             st.success("PDF 생성 완료! 아래 버튼으로 다운로드하세요.")
             st.download_button(
                 label="⬇️ 설치·시공 현장 제출 서류(PDF) 다운로드",
@@ -440,11 +468,11 @@ if submitted:
 
 with st.expander("도움말 / 안내"):
     st.markdown(
-        """
+        """ 
 - **촬영 버튼이 안 보이면**: 브라우저 *카메라 권한*을 허용해 주세요.
-- **한글이 깨질 때**: 실행 폴더에 `NanumGothic.ttf`를 두면 PDF에 폰트가 임베드되어 해결됩니다(윈도우는 자동으로 `맑은 고딕` 시도).
+- **한글이 깨질 때**: 앱 실행 폴더에 `NanumGothic.ttf` **와** `NanumGothicBold.ttf`를 두면 PDF에 폰트가 완전 임베드되어 해결됩니다(또는 Windows 기본 `malgun.ttf` + `malgunbd.ttf` 사용).
 - **사진 비율**: 모든 사진은 자동으로 **4:3 비율(패딩 방식)** 로 맞춰집니다.
 - **사진 권장 크기**: 1~3MB 내외 (앱에서 자동 리사이즈/압축)
-- **전화번호**: 자동으로 `010-1234-5678` 형식으로 정리됩니다.
+- **시공자 연락처**: 자동으로 `010-1234-5678` 형식 등으로 정리됩니다.
         """
     )
