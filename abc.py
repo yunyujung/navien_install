@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-# KD Navien 설치/교체현장 제출 서류 양식 (1페이지, 8컷 4x2) - 파일 업로드 전용(카메라 제거, 버튼 문구: 사진/앨범)
+# KD Navien 설치/교체현장 제출 서류 양식 (1페이지, 8컷 4x2)
+# - 파일 업로드만 사용(카메라 제거)
+# - 기본정보 저장/수정 버튼 제거 → 제출 시 검증
+# - iPhone 사진 EXIF 회전 보정 적용
+# - 한글 폰트 완전 임베드(글꼴 자동 인식)
 
 import io, os, re, unicodedata
 from pathlib import Path
@@ -7,13 +11,12 @@ from datetime import date
 from typing import List, Tuple, Optional
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps  # ← 회전 보정 위해 ImageOps 추가
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage
 )
-    # noqa
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -31,6 +34,10 @@ st.set_page_config(
 # 폰트 등록 (안정화: 실제 폰트명 반환)
 # ─────────────────────────────────────────
 def register_korean_font_stable() -> Tuple[str, str, bool]:
+    """
+    fonts 디렉토리에서 Regular/Bold 폰트를 찾아 등록.
+    반환: (regular_font_name, bold_font_name, ok)
+    """
     fonts_dir = (Path(__file__).parent if "__file__" in globals() else Path(os.getcwd())) / "fonts"
     reg_candidates  = ["NanumGothic.ttf", "NanumGothic-Regular.ttf", "NanumGothic.ttf.ttf"]
     bold_candidates = ["NanumGothicBold.ttf", "NanumGothic-Bold.ttf", "NanumGothicBold.ttf.ttf"]
@@ -122,9 +129,9 @@ def enforce_aspect_pad(img: Image.Image, target_ratio: float = 4/3) -> Image.Ima
     cur = w / h
     if abs(cur - target_ratio) < 1e-3:
         return img
-    if cur > target_ratio:
+    if cur > target_ratio:  # 가로 큼 → 세로 확장
         new_h = int(round(w / target_ratio)); new_w = w
-    else:
+    else:                   # 세로 큼 → 가로 확장
         new_w = int(round(h * target_ratio)); new_h = h
     canvas = Image.new("RGB", (new_w, new_h), (255, 255, 255))
     canvas.paste(img, ((new_w - w)//2, (new_h - h)//2))
@@ -225,76 +232,23 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
 # UI
 # ─────────────────────────────────────────
 st.markdown("### 경동나비엔 가스보일러 설치/교체현장 제출 서류 양식")
-st.info("모바일/PC에서 **사진/앨범** 버튼만 사용합니다. 모든 사진은 4:3 비율로 자동 보정됩니다.")
+st.info("모바일/PC에서 **사진/앨범** 버튼만 사용합니다. 모든 사진은 4:3 비율로 자동 보정되며, iPhone 사진의 회전도 자동 보정합니다.")
 
-if "meta_locked" not in st.session_state:
-    st.session_state.meta_locked = False
-if "meta_data" not in st.session_state:
-    st.session_state.meta_data = {}
+# ── 기본정보 입력(저장/수정 버튼 없음 → 제출 시 검증)
+c1, c2 = st.columns(2)
+with c1:
+    site_addr  = st.text_input("설치장소(주소)")
+    model_name = st.text_input("모델명")
+    max_gas    = st.text_input("최대가스소비량(kcal/h)")
+    flue       = st.selectbox("급배기방식", ["FF","FE"], index=0)
+with c2:
+    installer_company = st.text_input("설치업체명")
+    installer_name    = st.text_input("시공자 이름")
+    installer_phone   = st.text_input("시공자 연락처")
+    work_date         = st.date_input("시공연월일", value=date.today(), format="YYYY-MM-DD")
 
-# 메타 정보
-with st.form("meta", clear_on_submit=False):
-    disabled = st.session_state.meta_locked
-    c1, c2 = st.columns(2)
-    with c1:
-        site_addr  = st.text_input("설치장소(주소)", value=st.session_state.meta_data.get("site_addr",""), disabled=disabled)
-        model_name = st.text_input("모델명", value=st.session_state.meta_data.get("model_name",""), disabled=disabled)
-        max_gas    = st.text_input("최대가스소비량(kcal/h)", value=st.session_state.meta_data.get("max_gas",""), disabled=disabled)
-        flue       = st.selectbox("급배기방식", ["FF","FE"],
-                                  index=(["FF","FE"].index(st.session_state.meta_data.get("flue","FF"))
-                                         if st.session_state.meta_data.get("flue") in ["FF","FE"] else 0),
-                                  disabled=disabled)
-    with c2:
-        installer_company = st.text_input("설치업체명", value=st.session_state.meta_data.get("installer_company",""), disabled=disabled)
-        installer_name    = st.text_input("시공자 이름", value=st.session_state.meta_data.get("installer_name",""), disabled=disabled)
-        installer_phone   = st.text_input("시공자 연락처", value=st.session_state.meta_data.get("installer_phone",""), disabled=disabled)
-        work_date         = st.date_input("시공연월일", value=st.session_state.meta_data.get("work_date", date.today()),
-                                          format="YYYY-MM-DD", disabled=disabled)
-    b1, b2 = st.columns(2)
-    with b1:
-        submitted_meta = st.form_submit_button("✅ 기본정보 저장", disabled=disabled)
-    with b2:
-        unlock = st.form_submit_button("🔓 기본정보 수정", disabled=not disabled)
-
-if submitted_meta:
-    installer_phone_fmt = format_kr_phone(installer_phone)
-    missing = []
-    for k, v in [
-        ("설치장소(주소)", site_addr.strip()),
-        ("모델명", model_name.strip()),
-        ("최대가스소비량(kcal/h)", max_gas.strip()),
-        ("설치업체명", installer_company.strip()),
-        ("시공자 이름", installer_name.strip()),
-        ("시공자 연락처", installer_phone_fmt.strip()),
-    ]:
-        if not v:
-            missing.append(k)
-    if not validate_has_digit(max_gas):
-        missing.append("최대가스소비량(숫자 포함)")
-
-    if missing:
-        st.error("필수 항목 누락: " + ", ".join(missing))
-    else:
-        st.session_state.meta_data = {
-            "site_addr": site_addr.strip(),
-            "model_name": model_name.strip(),
-            "max_gas": max_gas.strip(),
-            "flue": flue,
-            "installer_company": installer_company.strip(),
-            "installer_name": installer_name.strip(),
-            "installer_phone": installer_phone_fmt,
-            "work_date": work_date,
-        }
-        st.session_state.meta_locked = True
-        st.success("저장 완료! 입력칸을 잠궜습니다. '🔓 기본정보 수정'으로 다시 수정할 수 있어요.")
-
-if "unlock" in locals() and unlock:
-    st.session_state.meta_locked = False
-    st.info("기본정보를 다시 수정할 수 있습니다.")
-
-# 현장 사진 (파일 업로드만)
+# ── 현장 사진 (파일 업로드만, iPhone EXIF 회전 보정)
 st.markdown("#### 현장 사진")
-
 labels = [
     "1. 가스보일러 전면사진",
     "2. 배기통(실내)",
@@ -305,7 +259,6 @@ labels = [
     "7. 플랙시블호스/가스밸브",
     "8. 기타",
 ]
-
 uploads: list[Optional[Image.Image]] = [None] * 8
 for r in range(2):
     cols = st.columns(4)
@@ -316,28 +269,45 @@ for r in range(2):
             fu = st.file_uploader("사진/앨범", type=["jpg","jpeg","png"], key=f"fu_{i}")
             if fu is not None:
                 img = Image.open(fu).convert("RGB")
+                img = ImageOps.exif_transpose(img)   # ← iPhone 회전 자동 보정
                 uploads[i] = enforce_aspect_pad(img, 4/3)
                 st.image(uploads[i], use_container_width=True)
 
-# PDF 생성
+# ── 제출서류 생성 (눌렀을 때 기본정보 검증)
 if st.button("📄 제출서류 생성"):
-    if not st.session_state.meta_data:
-        st.error("먼저 '✅ 기본정보 저장'을 눌러 주세요.")
+    installer_phone_fmt = format_kr_phone(installer_phone)
+    missing = []
+    checks = [
+        ("설치장소(주소)", site_addr.strip()),
+        ("모델명", model_name.strip()),
+        ("최대가스소비량(kcal/h)", max_gas.strip()),
+        ("설치업체명", installer_company.strip()),
+        ("시공자 이름", installer_name.strip()),
+        ("시공자 연락처", installer_phone_fmt.strip()),
+    ]
+    for k, v in checks:
+        if not v:
+            missing.append(k)
+    if not validate_has_digit(max_gas):
+        missing.append("최대가스소비량(숫자 포함)")
+
+    if missing:
+        st.error("기본정보를 모두 입력하세요.")
+        st.caption("누락 항목: " + ", ".join(missing))
     else:
         try:
             images: List[Tuple[str, Optional[Image.Image]]] = [(labels[i], uploads[i]) for i in range(8)]
-            md = st.session_state.meta_data
             meta = {
-                "site_addr": md["site_addr"],
-                "model_name": md["model_name"],
-                "max_gas": md["max_gas"],
-                "flue": md["flue"],
-                "installer_company": md["installer_company"],
-                "installer": f"{md['installer_name']} / {md['installer_phone']}",
-                "date": str(md["work_date"]),
+                "site_addr": site_addr.strip(),
+                "model_name": model_name.strip(),
+                "max_gas": max_gas.strip(),
+                "flue": flue,
+                "installer_company": installer_company.strip(),
+                "installer": f"{installer_name.strip()} / {installer_phone_fmt}",
+                "date": str(work_date),
             }
             pdf_bytes = build_pdf(meta, images)
-            safe_site = sanitize_filename(md["site_addr"])
+            safe_site = sanitize_filename(site_addr)
             st.success("PDF 생성 완료! 아래 버튼으로 다운로드하세요.")
             st.download_button(
                 "⬇️ 설치·시공 현장 제출 서류(PDF) 다운로드",
@@ -353,6 +323,7 @@ with st.expander("도움말 / 안내"):
     st.markdown("""
 - **한글 깨짐**: `fonts` 폴더에 `NanumGothic.ttf` + `NanumGothicBold.ttf`(또는 이름 변형)가 있어야 하며, 이 앱은 자동으로 감지해 등록합니다.
 - **사진 업로드**: **사진/앨범** 버튼만 사용합니다. (카메라 입력 없음)
+- **아이폰 회전 보정**: 업로드 시 자동으로 EXIF 회전 정보를 반영합니다.
 - **사진 비율**: 모든 사진은 자동으로 4:3으로 패딩 보정됩니다.
 - **연락처**: `010-1234-5678` 형태로 자동 정리됩니다.
 """)
