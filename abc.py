@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# KD Navien 설치/교체현장 제출 서류 양식 (1페이지, 8컷 4x2) - 안정화 폰트 버전
+# KD Navien 설치/교체현장 제출 서류 양식 (1페이지, 8컷 4x2) - 안정화 & 카메라 1회 권한 버전
 
 import io, os, re, unicodedata
 from pathlib import Path
@@ -33,8 +33,8 @@ def register_korean_font_stable() -> Tuple[str, str, bool]:
     """
     fonts 디렉토리에서 Regular/Bold 폰트를 찾아 등록.
     반환: (regular_font_name, bold_font_name, ok)
-    - ok=True면 두 폰트 모두 등록됨 (PDF 한글 절대 안 깨짐)
-    - ok=False면 헬베티카로 대체 (한글은 깨질 수 있어 UI에서 중단 처리)
+    - ok=True면 두 폰트 모두 등록됨
+    - ok=False면 헬베티카로 대체(한글은 깨질 수 있어 UI에서 중단)
     """
     fonts_dir = (Path(__file__).parent if "__file__" in globals() else Path(os.getcwd())) / "fonts"
 
@@ -47,28 +47,22 @@ def register_korean_font_stable() -> Tuple[str, str, bool]:
 
     if reg_path and bold_path:
         try:
-            # 등록될 "폰트 이름"(헷갈리지 않게 고정 네이밍 사용)
             REG_NAME  = "KFont-Regular"
             BOLD_NAME = "KFont-Bold"
-
             pdfmetrics.registerFont(TTFont(REG_NAME,  str(reg_path)))
             pdfmetrics.registerFont(TTFont(BOLD_NAME, str(bold_path)))
-
-            # ParagraphStyle.fontName에는 "실제 폰트명"을 직접 넣어 사용한다.
             return REG_NAME, BOLD_NAME, True
         except Exception as e:
             st.error(f"폰트 등록 오류: {e}")
             return "Helvetica", "Helvetica-Bold", False
 
-    # 못 찾으면 폴백
     return "Helvetica", "Helvetica-Bold", False
-
 
 REG_FONT, BOLD_FONT, FONT_OK = register_korean_font_stable()
 if not FONT_OK:
     st.error("❗ PDF 한글 폰트를 찾지 못했습니다. 'fonts' 폴더에 "
              "NanumGothic.ttf / NanumGothicBold.ttf (또는 -Regular/-Bold, .ttf.ttf) 파일을 넣어주세요.")
-    st.stop()  # 폰트 없이 진행하면 또 깨지므로 중단
+    st.stop()
 
 # ─────────────────────────────────────────
 # 스타일
@@ -116,13 +110,6 @@ def format_kr_phone(s: str) -> str:
 def validate_has_digit(s: str) -> bool:
     return bool(re.search(r"\d", s))
 
-def _pick_image(file_uploader, camera_input) -> Optional[Image.Image]:
-    if camera_input is not None:
-        return Image.open(camera_input).convert("RGB")
-    if file_uploader is not None:
-        return Image.open(file_uploader).convert("RGB")
-    return None
-
 def _resize_for_pdf(img: Image.Image, max_px: int = 1400) -> Image.Image:
     w, h = img.size
     if max(w, h) <= max_px:
@@ -150,6 +137,13 @@ def enforce_aspect_pad(img: Image.Image, target_ratio: float = 4/3) -> Image.Ima
     canvas = Image.new("RGB", (new_w, new_h), (255, 255, 255))
     canvas.paste(img, ((new_w - w)//2, (new_h - h)//2))
     return canvas
+
+def _pick_image(file_uploader, camera_input) -> Optional[Image.Image]:
+    if camera_input is not None:
+        return Image.open(camera_input).convert("RGB")
+    if file_uploader is not None:
+        return Image.open(file_uploader).convert("RGB")
+    return None
 
 # ─────────────────────────────────────────
 # PDF 빌더
@@ -256,13 +250,16 @@ def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]
 # UI
 # ─────────────────────────────────────────
 st.markdown("### 경동나비엔 가스보일러 설치/교체현장 제출 서류 양식")
-st.info("모바일에서는 **촬영** 또는 **사진/갤러리 선택**을 이용하세요. 모든 사진은 4:3 비율로 자동 보정됩니다.")
+st.info("모바일에서는 **촬영 권한**을 한 번만 허용하면 계속 촬영할 수 있어요. 모든 사진은 4:3 비율로 자동 보정됩니다.")
 
 if "meta_locked" not in st.session_state:
     st.session_state.meta_locked = False
 if "meta_data" not in st.session_state:
     st.session_state.meta_data = {}
+if "photos" not in st.session_state:
+    st.session_state.photos = [None] * 8  # 각 칸 PIL.Image 저장
 
+# ── 메타 정보 폼
 with st.form("meta", clear_on_submit=False):
     disabled = st.session_state.meta_locked
     c1, c2 = st.columns(2)
@@ -322,8 +319,11 @@ if "unlock" in locals() and unlock:
     st.session_state.meta_locked = False
     st.info("기본정보를 다시 수정할 수 있습니다.")
 
-# 현장 사진
+# ─────────────────────────────────────────
+# 현장 사진 (카메라 1개만 사용: 권한 팝업 1회)
+# ─────────────────────────────────────────
 st.markdown("#### 현장 사진")
+
 labels = [
     "1. 가스보일러 전면사진",
     "2. 배기통(실내)",
@@ -334,30 +334,46 @@ labels = [
     "7. 플랙시블호스/가스밸브",
     "8. 기타",
 ]
-uploads = []
+
+# 1) 한 번만 쓰는 전역 카메라
+st.info("카메라 권한은 한 번만 허용하면 계속 촬영할 수 있어요.")
+slot = st.selectbox("촬영해서 넣을 칸 선택", options=list(range(8)),
+                    format_func=lambda i: labels[i], index=0)
+cam = st.camera_input("📷 촬영 (권한 팝업은 1회만)", key="one_camera")
+if cam is not None:
+    img = Image.open(cam).convert("RGB")
+    img = enforce_aspect_pad(img, 4/3)
+    st.session_state.photos[slot] = img
+    st.success(f"✅ 촬영한 사진을 '{labels[slot]}' 칸에 넣었습니다.")
+
+st.divider()
+
+# 2) 각 칸에 갤러리 업로드(권한 불필요)
+st.caption("앨범에서 고르려면 각 칸 아래 '사진/갤러리 선택'을 사용하세요.")
 for r in range(2):
     cols = st.columns(4)
     for c in range(4):
         i = r*4 + c
         with cols[c]:
-            st.caption(labels[i])
-            cam = st.camera_input("📷 촬영", key=f"cam_{i}")
-            fu  = st.file_uploader("사진/갤러리 선택", type=["jpg","jpeg","png"], key=f"fu_{i}")
-            uploads.append((fu, cam))
+            st.markdown(f"**{labels[i]}**")
+            if st.session_state.photos[i] is not None:
+                st.image(st.session_state.photos[i], use_container_width=True)
+            fu = st.file_uploader("사진/갤러리 선택", type=["jpg","jpeg","png"], key=f"fu_slot_{i}")
+            if fu is not None:
+                img = Image.open(fu).convert("RGB")
+                img = enforce_aspect_pad(img, 4/3)
+                st.session_state.photos[i] = img
+                st.toast(f"'{labels[i]}'에 사진을 넣었습니다.", icon="✅")
 
-# 생성 버튼
+# 3) PDF 생성
 if st.button("📄 제출서류 생성"):
     if not st.session_state.meta_data:
         st.error("먼저 '✅ 기본정보 저장'을 눌러 주세요.")
     else:
         try:
-            imgs: List[Tuple[str, Optional[Image.Image]]] = []
-            for (fu, cam), label in zip(uploads, labels):
-                pil = _pick_image(fu, cam)
-                if pil is not None:
-                    pil = enforce_aspect_pad(pil, 4/3)
-                imgs.append((label, pil))
-
+            images: List[Tuple[str, Optional[Image.Image]]] = [
+                (label, st.session_state.photos[i]) for i, label in enumerate(labels)
+            ]
             md = st.session_state.meta_data
             meta = {
                 "site_addr": md["site_addr"],
@@ -369,14 +385,14 @@ if st.button("📄 제출서류 생성"):
                 "date": str(md["work_date"]),
             }
 
-            pdf_bytes = build_pdf(meta, imgs)
+            pdf_bytes = build_pdf(meta, images)
             safe_site = sanitize_filename(md["site_addr"])
             st.success("PDF 생성 완료! 아래 버튼으로 다운로드하세요.")
             st.download_button(
                 "⬇️ 설치·시공 현장 제출 서류(PDF) 다운로드",
                 data=pdf_bytes,
                 file_name=f"{safe_site}_설치교체현장_제출서류.pdf",
-                mime="application/pdf"
+                mime="application/pdf",
             )
         except Exception as e:
             st.error("PDF 생성 중 오류가 발생했습니다.")
@@ -385,6 +401,7 @@ if st.button("📄 제출서류 생성"):
 with st.expander("도움말 / 안내"):
     st.markdown("""
 - **한글 깨짐**: `fonts` 폴더에 `NanumGothic.ttf` + `NanumGothicBold.ttf`(또는 이름 변형)가 있어야 하며, 이 앱은 자동으로 감지해 등록합니다.
+- **카메라 권한**: `촬영 (권한 팝업은 1회만)`을 통해 한 번만 허용하면 계속 촬영 가능합니다.
 - **사진 비율**: 모든 사진은 자동으로 4:3으로 패딩 보정됩니다.
 - **연락처**: `010-1234-5678` 형태로 자동 정리됩니다.
 """)
