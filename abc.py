@@ -1,329 +1,205 @@
-# -*- coding: utf-8 -*-
-# KD Navien 설치/교체현장 제출 서류 양식 (1페이지, 8컷 4x2)
-# - 파일 업로드만 사용(카메라 제거)
-# - 기본정보 저장/수정 버튼 제거 → 제출 시 검증
-# - iPhone 사진 EXIF 회전 보정 적용
-# - 한글 폰트 완전 임베드(글꼴 자동 인식)
-
-import io, os, re, unicodedata
-from pathlib import Path
-from datetime import date
-from typing import List, Tuple, Optional
+# app.py
+# 대기오염물질배출시설 / 특정가스사용시설 판별 도구
+# Streamlit으로 실행:  streamlit run app.py
 
 import streamlit as st
-from PIL import Image, ImageOps  # ← 회전 보정 위해 ImageOps 추가
 
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as RLImage
-)
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
-# ─────────────────────────────────────────
-# 페이지 설정
-# ─────────────────────────────────────────
 st.set_page_config(
-    page_title="경동나비엔 가스보일러 설치/교체현장 제출 서류 양식",
-    layout="wide"
+    page_title="대기오염물질배출시설 · 특정가스사용시설 판별",
+    layout="centered",
 )
 
-# ─────────────────────────────────────────
-# 폰트 등록 (안정화: 실제 폰트명 반환)
-# ─────────────────────────────────────────
-def register_korean_font_stable() -> Tuple[str, str, bool]:
-    """
-    fonts 디렉토리에서 Regular/Bold 폰트를 찾아 등록.
-    반환: (regular_font_name, bold_font_name, ok)
-    """
-    fonts_dir = (Path(__file__).parent if "__file__" in globals() else Path(os.getcwd())) / "fonts"
-    reg_candidates  = ["NanumGothic.ttf", "NanumGothic-Regular.ttf", "NanumGothic.ttf.ttf"]
-    bold_candidates = ["NanumGothicBold.ttf", "NanumGothic-Bold.ttf", "NanumGothicBold.ttf.ttf"]
+st.title("대기오염물질배출시설 · 특정가스사용시설 판별 도구")
 
-    reg_path  = next((fonts_dir / n for n in reg_candidates  if (fonts_dir / n).exists()), None)
-    bold_path = next((fonts_dir / n for n in bold_candidates if (fonts_dir / n).exists()), None)
+TAB1, TAB2 = st.tabs(["대기오염물질배출시설", "특정가스사용시설"])
 
-    if reg_path and bold_path:
-        try:
-            REG_NAME  = "KFont-Regular"
-            BOLD_NAME = "KFont-Bold"
-            pdfmetrics.registerFont(TTFont(REG_NAME,  str(reg_path)))
-            pdfmetrics.registerFont(TTFont(BOLD_NAME, str(bold_path)))
-            return REG_NAME, BOLD_NAME, True
-        except Exception as e:
-            st.error(f"폰트 등록 오류: {e}")
-            return "Helvetica", "Helvetica-Bold", False
-    return "Helvetica", "Helvetica-Bold", False
+# -------------------------------------------------------------------
+# 1. 대기오염물질배출시설 탭
+# -------------------------------------------------------------------
+with TAB1:
+    st.subheader("대기오염물질배출시설 판별")
 
-REG_FONT, BOLD_FONT, FONT_OK = register_korean_font_stable()
-if not FONT_OK:
-    st.error("❗ PDF 한글 폰트를 찾지 못했습니다. 'fonts' 폴더에 "
-             "NanumGothic.ttf / NanumGothicBold.ttf (또는 -Regular/-Bold, .ttf.ttf) 파일을 넣어주세요.")
-    st.stop()
+    st.markdown(
+        """
+**가스·경질유 사용 보일러/흡수식 냉·온수기 대상 기준**
 
-# ─────────────────────────────────────────
-# 스타일
-# ─────────────────────────────────────────
-ss = getSampleStyleSheet()
-styles = {
-    "title": ParagraphStyle(
-        name="title", parent=ss["Heading1"], fontName=REG_FONT,
-        fontSize=16, leading=20, alignment=1, spaceAfter=8
-    ),
-    "cell": ParagraphStyle(
-        name="cell", parent=ss["Normal"], fontName=REG_FONT,
-        fontSize=9, leading=12
-    ),
-    "photo_caption": ParagraphStyle(
-        name="photo_caption", parent=ss["Normal"], fontName=BOLD_FONT,
-        fontSize=11, leading=14, alignment=1
-    ),
-    "small_center": ParagraphStyle(
-        name="small_center", parent=ss["Normal"], fontName=REG_FONT,
-        fontSize=8, leading=11, alignment=1
-    ),
-}
+- 시간당 증발량이 **2톤 이상**, 또는  
+- 시간당 열량이 **1,238,600 kcal/h 이상**인 경우에만 「대기오염물질배출시설」에 해당합니다.
 
-# ─────────────────────────────────────────
-# 유틸
-# ─────────────────────────────────────────
-def sanitize_filename(name: str) -> str:
-    name = unicodedata.normalize("NFKD", name)
-    name = re.sub(r'[\\/:*?"<>|]', "_", name).strip().strip(".")
-    return name or "output"
+단, 다음의 소형 보일러(환경표지 인증 보일러)는 **용량 산정에서 제외**될 수 있습니다.  
+- 시간당 증발량 **0.1톤 미만** 또는  
+- 시간당 열량 **61,900 kcal/h 미만**이면서  
+- 「환경기술 및 환경산업 지원법」 제17조에 따른 **환경표지 인증**을 받은 보일러  
 
-def format_kr_phone(s: str) -> str:
-    digits = re.sub(r"\D", "", s)
-    if digits.startswith("02") and len(digits) in (9, 10):
-        return f"02-{digits[2:-4]}-{digits[-4:]}"
-    if digits.startswith(("010","011","016","017","018","019")) and len(digits) in (10, 11):
-        return f"{digits[:3]}-{digits[3:-4]}-{digits[-4:]}"
-    m = re.match(r"^0\d{1,2}", digits)
-    if m and len(digits) >= 9:
-        area = m.group(); rest = digits[len(area):]
-        return f"{area}-{rest[:-4]}-{rest[-4:]}"
-    return s
-
-def validate_has_digit(s: str) -> bool:
-    return bool(re.search(r"\d", s))
-
-def _resize_for_pdf(img: Image.Image, max_px: int = 1400) -> Image.Image:
-    w, h = img.size
-    if max(w, h) <= max_px:
-        return img
-    if w >= h:
-        return img.resize((max_px, int(h * (max_px / w))))
-    else:
-        return img.resize((int(w * (max_px / h)), max_px))
-
-def _pil_to_bytesio(img: Image.Image, quality=85) -> io.BytesIO:
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=quality, optimize=True)
-    buf.seek(0)
-    return buf
-
-def enforce_aspect_pad(img: Image.Image, target_ratio: float = 4/3) -> Image.Image:
-    w, h = img.size
-    cur = w / h
-    if abs(cur - target_ratio) < 1e-3:
-        return img
-    if cur > target_ratio:  # 가로 큼 → 세로 확장
-        new_h = int(round(w / target_ratio)); new_w = w
-    else:                   # 세로 큼 → 가로 확장
-        new_w = int(round(h * target_ratio)); new_h = h
-    canvas = Image.new("RGB", (new_w, new_h), (255, 255, 255))
-    canvas.paste(img, ((new_w - w)//2, (new_h - h)//2))
-    return canvas
-
-# ─────────────────────────────────────────
-# PDF 빌더
-# ─────────────────────────────────────────
-def build_pdf(meta: dict, titled_images: List[Tuple[str, Optional[Image.Image]]]) -> bytes:
-    buf = io.BytesIO()
-    PAGE_W, PAGE_H = A4
-    MLR, MTB = 20, 20
-
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        topMargin=MTB, bottomMargin=MTB, leftMargin=MLR, rightMargin=MLR,
-        title="경동나비엔 가스보일러 설치/교체현장 제출 서류 양식"
+→ 실제 적용 여부는 **유역환경청장·지방환경청장·수도권대기환경청장 또는 시·도지사 확인이 반드시 필요**합니다.
+        """
     )
-    story = []
-    story.append(Paragraph("경동나비엔 가스보일러 설치/교체현장 제출 서류 양식", styles["title"]))
-    story.append(Spacer(1, 4))
 
-    rows = [
-        [Paragraph("설치장소(주소)", styles["cell"]), Paragraph(meta["site_addr"], styles["cell"])],
-        [Paragraph("모델명", styles["cell"]), Paragraph(meta["model_name"], styles["cell"])],
-        [Paragraph("최대가스소비량(kcal/h)", styles["cell"]), Paragraph(meta["max_gas"], styles["cell"])],
-        [Paragraph("급배기방식", styles["cell"]), Paragraph(meta["flue"], styles["cell"])],
-        [Paragraph("설치업체명", styles["cell"]), Paragraph(meta["installer_company"], styles["cell"])],
-        [Paragraph("시공자 (이름/연락처)", styles["cell"]), Paragraph(meta["installer"], styles["cell"])],
-        [Paragraph("시공연월일", styles["cell"]), Paragraph(meta["date"], styles["cell"])],
-    ]
-    tbl = Table(rows, colWidths=[105, PAGE_W - 2*MLR - 105])
-    tbl.setStyle(TableStyle([
-        ("BOX", (0,0), (-1,-1), 0.9, colors.black),
-        ("INNERGRID", (0,0), (-1,-1), 0.3, colors.grey),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LEFTPADDING", (0,0), (-1,-1), 4),
-        ("RIGHTPADDING",(0,0), (-1,-1), 6),
-        ("TOPPADDING",  (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING",(0,0), (-1,-1), 3),
-    ]))
-    story.append(tbl); story.append(Spacer(1, 8))
+    st.markdown("### 1) 캐스케이드 용량 입력")
 
-    col_count = 4
-    usable_w = PAGE_W - 2*MLR
-    col_w = (usable_w - 6*(col_count-1)) / col_count
-    ROW_H, CAP_H = 240, 28
-    IMG_MAX_H = ROW_H - CAP_H - 8
-    IMG_MAX_W = col_w - 8
+    # 모델별 정격 용량 (kcal/h)
+    NPW_CAP = 50_000      # NPW-48K(KD)
+    NCB_CAP = 47_500      # NCB790-45LS
+    NFB_CAP = 105_500     # NFB790-100LS
 
-    cells = []
-    for title, pil_img in titled_images:
-        if pil_img is not None:
-            pil_img = enforce_aspect_pad(pil_img, 4/3)
-            bio = _pil_to_bytesio(_resize_for_pdf(pil_img, 1400), quality=85)
-            tw = IMG_MAX_W; th = tw * 3/4
-            if th > IMG_MAX_H:
-                th = IMG_MAX_H; tw = th * 4/3
-            rim = RLImage(bio, width=tw, height=th); rim.hAlign = "CENTER"
-            cell = Table([[rim], [Paragraph(title, styles["photo_caption"])]],
-                         colWidths=[col_w], rowHeights=[ROW_H-CAP_H, CAP_H])
-            cell.setStyle(TableStyle([
-                ("BOX", (0,0), (-1,-1), 0.3, colors.grey),
-                ("VALIGN", (0,0), (-1,0), "MIDDLE"),
-                ("ALIGN", (0,0), (-1,-1), "CENTER"),
-            ]))
-        else:
-            cell = Table([[Paragraph("(사진 없음)", styles["small_center"])],
-                          [Paragraph(title, styles["photo_caption"])]],
-                         colWidths=[col_w], rowHeights=[ROW_H-CAP_H, CAP_H])
-            cell.setStyle(TableStyle([
-                ("BOX", (0,0), (-1,-1), 0.3, colors.grey),
-                ("VALIGN", (0,0), (-1,0), "MIDDLE"),
-                ("ALIGN", (0,0), (-1,-1), "CENTER"),
-            ]))
-        cells.append(cell)
+    col1, col2 = st.columns(2)
+    with col1:
+        npw_count = st.number_input("NPW-48K(KD) 대수", min_value=0, step=1, value=0)
+        ncb_count = st.number_input("NCB790-45LS 대수", min_value=0, step=1, value=0)
+        nfb_count = st.number_input("NFB790-100LS 대수", min_value=0, step=1, value=0)
+    with col2:
+        st.markdown(
+            f"""
+            - NPW-48K(KD): **{NPW_CAP:,.0f} kcal/h/대**  
+            - NCB790-45LS: **{NCB_CAP:,.0f} kcal/h/대**  
+            - NFB790-100LS: **{NFB_CAP:,.0f} kcal/h/대**
+            """
+        )
 
-    while len(cells) < 8:
-        cells.append(Table([[Paragraph("(사진 없음)", styles["small_center"])],
-                            [Paragraph("추가 사진", styles["photo_caption"])]],
-                           colWidths=[col_w], rowHeights=[ROW_H-CAP_H, CAP_H]))
+    cascade_capacity = (
+        npw_count * NPW_CAP
+        + ncb_count * NCB_CAP
+        + nfb_count * NFB_CAP
+    )
 
-    grid = Table([cells[0:4], cells[4:8]],
-                 colWidths=[col_w]*4, rowHeights=[ROW_H, ROW_H],
-                 hAlign="CENTER")
-    grid.setStyle(TableStyle([
-        ("LEFTPADDING",(0,0),(-1,-1),2),
-        ("RIGHTPADDING",(0,0),(-1,-1),2),
-        ("TOPPADDING",(0,0),(-1,-1),2),
-        ("BOTTOMPADDING",(0,0),(-1,-1),2),
-        ("ALIGN",(0,0),(-1,-1),"CENTER"),
-    ]))
-    story.append(grid)
-    doc.build(story)
-    return buf.getvalue()
+    st.markdown("### 2) 타 장비 합산 용량 입력")
+    other_capacity = st.number_input(
+        "타 장비 합산용량 (kcal/h)",
+        min_value=0.0,
+        step=10_000.0,
+        format="%.0f",
+        value=0.0,
+    )
 
-# ─────────────────────────────────────────
-# UI
-# ─────────────────────────────────────────
-st.markdown("### 경동나비엔 가스보일러 설치/교체현장 제출 서류 양식")
-st.info("모바일/PC에서 **사진/앨범** 버튼만 사용합니다. 모든 사진은 4:3 비율로 자동 보정되며, iPhone 사진의 회전도 자동 보정합니다.")
+    THRESHOLD_AIR = 1_238_600  # 대기오염물질배출시설 기준(사용자 요청값)
 
-# ── 기본정보 입력(저장/수정 버튼 없음 → 제출 시 검증)
-c1, c2 = st.columns(2)
-with c1:
-    site_addr  = st.text_input("설치장소(주소)")
-    model_name = st.text_input("모델명")
-    max_gas    = st.text_input("최대가스소비량(kcal/h)")
-    flue       = st.selectbox("급배기방식", ["FF","FE"], index=0)
-with c2:
-    installer_company = st.text_input("설치업체명")
-    installer_name    = st.text_input("시공자 이름")
-    installer_phone   = st.text_input("시공자 연락처")
-    work_date         = st.date_input("시공연월일", value=date.today(), format="YYYY-MM-DD")
+    if st.button("대기오염물질배출시설 판별", key="air_judge"):
+        total_capacity = cascade_capacity + other_capacity
 
-# ── 현장 사진 (파일 업로드만, iPhone EXIF 회전 보정)
-st.markdown("#### 현장 사진")
-labels = [
-    "1. 가스보일러 전면사진",
-    "2. 배기통(실내)",
-    "3. 배기통(실외)",
-    "4. 일산화탄소 경보기",
-    "5. 시공표지판",
-    "6. 명판",
-    "7. 플랙시블호스/가스밸브",
-    "8. 기타",
-]
-uploads: list[Optional[Image.Image]] = [None] * 8
-for r in range(2):
-    cols = st.columns(4)
-    for c in range(4):
-        i = r*4 + c
-        with cols[c]:
-            st.markdown(f"**{labels[i]}**")
-            fu = st.file_uploader("사진/앨범", type=["jpg","jpeg","png"], key=f"fu_{i}")
-            if fu is not None:
-                img = Image.open(fu).convert("RGB")
-                img = ImageOps.exif_transpose(img)   # ← iPhone 회전 자동 보정
-                uploads[i] = enforce_aspect_pad(img, 4/3)
-                st.image(uploads[i], use_container_width=True)
+        st.markdown("#### 🔎 계산 결과")
 
-# ── 제출서류 생성 (눌렀을 때 기본정보 검증)
-if st.button("📄 제출서류 생성"):
-    installer_phone_fmt = format_kr_phone(installer_phone)
-    missing = []
-    checks = [
-        ("설치장소(주소)", site_addr.strip()),
-        ("모델명", model_name.strip()),
-        ("최대가스소비량(kcal/h)", max_gas.strip()),
-        ("설치업체명", installer_company.strip()),
-        ("시공자 이름", installer_name.strip()),
-        ("시공자 연락처", installer_phone_fmt.strip()),
-    ]
-    for k, v in checks:
-        if not v:
-            missing.append(k)
-    if not validate_has_digit(max_gas):
-        missing.append("최대가스소비량(숫자 포함)")
+        st.write(
+            f"- 캐스케이드 합산 용량: **{cascade_capacity:,.0f} kcal/h**"
+        )
+        st.write(
+            f"- 타 장비 합산 용량: **{other_capacity:,.0f} kcal/h**"
+        )
+        st.write(
+            f"- 총 합산 용량: **{total_capacity:,.0f} kcal/h**"
+        )
+        st.write(
+            f"- 판정 기준: **{THRESHOLD_AIR:,.0f} kcal/h** 이상이면 대기오염물질배출시설"
+        )
 
-    if missing:
-        st.error("기본정보를 모두 입력하세요.")
-        st.caption("누락 항목: " + ", ".join(missing))
-    else:
-        try:
-            images: List[Tuple[str, Optional[Image.Image]]] = [(labels[i], uploads[i]) for i in range(8)]
-            meta = {
-                "site_addr": site_addr.strip(),
-                "model_name": model_name.strip(),
-                "max_gas": max_gas.strip(),
-                "flue": flue,
-                "installer_company": installer_company.strip(),
-                "installer": f"{installer_name.strip()} / {installer_phone_fmt}",
-                "date": str(work_date),
-            }
-            pdf_bytes = build_pdf(meta, images)
-            safe_site = sanitize_filename(site_addr)
-            st.success("PDF 생성 완료! 아래 버튼으로 다운로드하세요.")
-            st.download_button(
-                "⬇️ 설치·시공 현장 제출 서류(PDF) 다운로드",
-                data=pdf_bytes,
-                file_name=f"{safe_site}_설치교체현장_제출서류.pdf",
-                mime="application/pdf",
+        if total_capacity > THRESHOLD_AIR:
+            st.error(
+                f"✅ 총 용량 **{total_capacity:,.0f} kcal/h** 이(가) "
+                f"기준 **{THRESHOLD_AIR:,.0f} kcal/h** 을 **초과**하므로, "
+                "**대기오염물질배출시설에 해당됩니다.**"
             )
-        except Exception as e:
-            st.error("PDF 생성 중 오류가 발생했습니다.")
-            st.exception(e)
+        else:
+            st.success(
+                f"✅ 총 용량 **{total_capacity:,.0f} kcal/h** 이(가) "
+                f"기준 **{THRESHOLD_AIR:,.0f} kcal/h** **이하**이므로, "
+                "**대기오염물질배출시설에 해당되지 않습니다.**"
+            )
 
-with st.expander("도움말 / 안내"):
-    st.markdown("""
-- **한글 깨짐**: `fonts` 폴더에 `NanumGothic.ttf` + `NanumGothicBold.ttf`(또는 이름 변형)가 있어야 하며, 이 앱은 자동으로 감지해 등록합니다.
-- **사진 업로드**: **사진/앨범** 버튼만 사용합니다. (카메라 입력 없음)
-- **아이폰 회전 보정**: 업로드 시 자동으로 EXIF 회전 정보를 반영합니다.
-- **사진 비율**: 모든 사진은 자동으로 4:3으로 패딩 보정됩니다.
-- **연락처**: `010-1234-5678` 형태로 자동 정리됩니다.
-""")
+        st.info(
+            "※ 환경표지 인증을 받은 소형 보일러(0.1톤 미만 또는 61,900 kcal/h 미만)는 "
+            "지자체에서 용량 산정 제외를 인정하는 경우 합산에서 빼고 입력해야 합니다."
+        )
+
+# -------------------------------------------------------------------
+# 2. 특정가스사용시설 탭
+# -------------------------------------------------------------------
+with TAB2:
+    st.subheader("특정가스사용시설 판별")
+
+    st.markdown(
+        """
+**특정가스사용시설이란?**
+
+1. 산업통상자원부장관이 정하는 기준에 따라 산정된 **월사용 예정량(Q)** 이  
+   - 일반 시설: **2,000 m³ 이상**  
+   - 제1종 보호시설: **1,000 m³ 이상**  
+   인 가스사용시설
+
+2. 또는 시·도지사가 안전관리를 위하여 필요하다고 인정하여 **지정한 시설**
+
+---
+
+### 월사용 예정량 산출식  
+(도시가스사업법 시행규칙 【별표7】, 통합고시 제6장 4절 제6-4-2조)
+
+\\[
+Q = \\frac{(A \\times 240) + (B \\times 90)}{11{,}000}
+\\]
+
+- **Q** : 월사용 예정량 (m³)  
+- **A** : *산업용* 연소기 가스소비량 합계 (kcal/h)  
+- **B** : *산업용이 아닌* 연소기 가스소비량 합계 (kcal/h)
+        """
+    )
+
+    st.markdown("### 1) 명판 소비량 입력")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        A = st.number_input(
+            "A : 산업용 연소기 가스소비량 합계 (kcal/h)",
+            min_value=0.0,
+            step=10_000.0,
+            format="%.0f",
+            value=0.0,
+        )
+    with col2:
+        B = st.number_input(
+            "B : 산업용이 아닌 연소기 가스소비량 합계 (kcal/h)",
+            min_value=0.0,
+            step=10_000.0,
+            format="%.0f",
+            value=0.0,
+        )
+
+    st.markdown("### 2) 시설 유형 선택")
+    facility_type = st.radio(
+        "시설 유형을 선택하세요.",
+        ["일반 시설", "제1종 보호시설"],
+        horizontal=True,
+    )
+
+    if st.button("특정가스사용시설 판별", key="gas_judge"):
+        # 월사용 예정량 계산
+        Q_industrial = A * 240 / 11_000
+        Q_general = B * 90 / 11_000
+        Q_total = Q_industrial + Q_general
+
+        threshold = 1_000 if facility_type == "제1종 보호시설" else 2_000
+
+        st.markdown("#### 🔎 계산 결과")
+
+        st.write(f"- 산업용 사용량: **{Q_industrial:,.1f} m³/월**")
+        st.write(f"- 일반용 사용량: **{Q_general:,.1f} m³/월**")
+        st.write(f"- 월사용 예정량 Q: **{Q_total:,.1f} m³/월**")
+        st.write(
+            f"- 적용 기준: **{facility_type} → {threshold:,.0f} m³/월 이상이면 특정가스사용시설**"
+        )
+
+        if Q_total >= threshold:
+            st.error(
+                f"✅ 월사용 예정량 **{Q_total:,.1f} m³/월** 이(가) "
+                f"기준 **{threshold:,.0f} m³/월** 이상이므로, "
+                "**특정가스사용시설에 해당됩니다.**"
+            )
+        else:
+            st.success(
+                f"✅ 월사용 예정량 **{Q_total:,.1f} m³/월** 이(가) "
+                f"기준 **{threshold:,.0f} m³/월** 미만이므로, "
+                "**특정가스사용시설에 해당되지 않습니다.**"
+            )
+
+    st.info(
+        "※ 제1종 보호시설에는 학교·유치원·어린이집·병원·공중목욕탕·호텔 등, "
+        "사람을 수용하는 건축물 중 일정 규모 이상 시설이 포함됩니다. "
+        "실제 판정 시에는 해당 지자체 고시 및 개별 지정 여부를 함께 확인해야 합니다."
+    )
