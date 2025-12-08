@@ -1,55 +1,6 @@
 import streamlit as st
 
-st.set_page_config(
-    page_title="대기오염물질배출시설·특정가스사용시설 판별",
-    layout="centered",
-)
-
-st.title("대기오염물질배출시설·특정가스사용시설 판별")
-
-# 🔥 반드시 먼저 탭을 선언해야 함
-TAB1, TAB2 = st.tabs(["대기오염물질배출시설", "특정가스사용시설"])
-
-# -------------------------------------------------------------------
-# 1) TAB1 시작
-# -------------------------------------------------------------------
-with TAB1:
-
-    st.subheader("대기오염물질배출시설 판별기준 [대기환경보전법 시행규칙 별표3]")
-
-    # 👉 여기에 이전에 수정해준 “캐스케이드 입력 + 체크박스 반영 코드”를 넣으면 됨
-    # (전체 코드 다시 붙여줄테니 아래 참고)
-
-# -------------------------------------------------------------------
-# 2) TAB2 시작
-# -------------------------------------------------------------------
-with TAB2:
-
-    st.subheader("특정가스사용시설 판별")
-    # 👉 여기에 특정가스 계산 코드 넣기
-🔥 당신이 붙여넣은 위치가 잘못되었을 가능성 높음
-오류 메시지:
-
-nginx
-코드 복사
-with TAB1:
-     ^^^^
-NameError
-➡️ 이건 100% “TAB1이 선언되기 전”에 실행되었다는 뜻.
-➡️ 즉, with TAB1: 위에 TAB1 선언 부분이 없는 상태.
-
-✅ 수정된 전체 TAB1 코드 포함해서 완전 정상 실행 가능한 app.py
-(오류 절대 안 나도록 전체 구성 맞춰준 버전)
-
-👉 전체 파일(app.py)을 아래 코드로 완전히 교체하면 해결됨.
-
-📌 당신이 요청한 모든 기능(순서 변경, 체크박스, 문구 변경, 타장비 설명 추가 포함)
-
-✔ 정상 실행 버전 전체 코드 (복붙하면 OK)
-python
-코드 복사
-import streamlit as st
-
+# 페이지 설정
 st.set_page_config(
     page_title="대기오염물질배출시설·특정가스사용시설 판별",
     layout="centered",
@@ -58,7 +9,7 @@ st.set_page_config(
 st.title("대기오염물질배출시설·특정가스사용시설 판별")
 
 # ---------------------------------------------------------
-# 🔥 반드시 가장 먼저 탭을 만든다
+# 🔥 반드시 가장 먼저 탭을 선언한다
 # ---------------------------------------------------------
 TAB1, TAB2 = st.tabs(["대기오염물질배출시설", "특정가스사용시설"])
 
@@ -110,7 +61,7 @@ with TAB1:
     colA, colB = st.columns([1, 1])
 
     with colA:
-        # 순서를 변경한 부분
+        # 순서 변경된 입력 필드
         ncb_count = st.number_input("NCB790-45LS 대수", min_value=0, step=1, value=0)
         ncb_exclude = st.checkbox("용량산정 제외 (지자체 허가 완료)", key="ncb_ex")
 
@@ -120,16 +71,16 @@ with TAB1:
     with colB:
         st.markdown(
             f"""
-            - NCB790-45LS: **{NCB_CAP:,.0f} kcal/h / 대**  
-            - NPW-48K(KD): **{NPW_CAP:,.0f} kcal/h / 대**  
-            - NFB790-100LS: **{NFB_CAP:,.0f} kcal/h / 대**
+            - NCB790-45LS : **{NCB_CAP:,} kcal/h / 대**  
+            - NPW-48K(KD) : **{NPW_CAP:,} kcal/h / 대**  
+            - NFB790-100LS : **{NFB_CAP:,} kcal/h / 대**  
             """
         )
 
-    # 체크 시 용량 0 처리
+    # 체크 시 용량 제외 처리
     NCB_effective = 0 if ncb_exclude else NCB_CAP
 
-    # 합산 계산
+    # 용량 계산
     cascade_capacity = (
         ncb_count * NCB_effective +
         npw_count * NPW_CAP +
@@ -149,6 +100,7 @@ with TAB1:
         "**타장비 : 가스 보일러(보일러, 온수기), 흡수식 냉온수기, 가스 열펌프**"
     )
 
+    # 기준값
     THRESHOLD_AIR = 1_238_000
 
     if st.button("대기오염물질배출시설 판별", key="air_judge"):
@@ -156,24 +108,25 @@ with TAB1:
         total_capacity = cascade_capacity + other_capacity
 
         st.markdown("#### 🔎 계산 결과")
-        st.write(f"- 캐스케이드 합산 용량: **{cascade_capacity:,.0f} kcal/h**")
+        st.write(f"- 캐스케이드 합산 용량 : **{cascade_capacity:,} kcal/h**")
         if ncb_exclude:
-            st.info("※ NCB790-45LS는 '용량산정 제외' 처리됨")
+            st.info("※ NCB790-45LS : 용량산정 제외 처리됨 (지자체 승인 완료)")
 
-        st.write(f"- 타 장비 합산 용량: **{other_capacity:,.0f} kcal/h**")
-        st.write(f"- 총 용량: **{total_capacity:,.0f} kcal/h**")
+        st.write(f"- 타 장비 합산 용량 : **{other_capacity:,} kcal/h**")
+        st.write(f"- 총 용량 : **{total_capacity:,} kcal/h**")
+        st.write(f"- 기준치 : **{THRESHOLD_AIR:,} kcal/h**")
 
         if total_capacity > THRESHOLD_AIR:
-            st.error("→ 기준 초과: **대기오염물질배출시설 해당**")
+            st.error("→ 기준 초과 : **대기오염물질배출시설 해당**")
         else:
-            st.success("→ 기준 이하: **대기오염물질배출시설 아님**")
+            st.success("→ 기준 이하 : **대기오염물질배출시설 아님**")
 
 
-
-# -------------------------------------------------------------------
-# 2. 특정가스사용시설 탭
-# -------------------------------------------------------------------
+# =====================================================================
+# 2) TAB 2 — 특정가스사용시설
+# =====================================================================
 with TAB2:
+
     st.subheader("특정가스사용시설 판별")
 
     st.markdown(
@@ -186,16 +139,16 @@ with TAB2:
 (도시가스사업법 시행규칙 【별표7】, 통합고시 제6장 제6-4-2조)**
 
 \\[
-Q = \\frac{(A \\times 240) + (B \\times 90)}{11{,}000}
+Q = \\frac{(A \\times 240) + (B \\times 90)}{11,000}
 \\]
 
 - **Q** : 월사용 예정량 (m³)  
-- **A** : 산업용 연소기 가스소비량 합계 (kcal/h)  
-- **B** : 일반용 연소기 가스소비량 합계 (kcal/h)
+- **A** : 산업용 연소기 가스소비량 (kcal/h)  
+- **B** : 일반용 연소기 가스소비량 (kcal/h)
 
 ---
 
-### 적용 기준
+### **적용 기준**
 - 일반 시설 : **2,000 m³ 이상**  
 - 제1종 보호시설 : **1,000 m³ 이상**
 """
@@ -237,21 +190,12 @@ Q = \\frac{(A \\times 240) + (B \\times 90)}{11{,}000}
 
         st.markdown("#### 🔎 계산 결과")
 
-        st.write(f"- 산업용 사용량: **{Q_industrial:,.1f} m³/월**")
-        st.write(f"- 일반용 사용량: **{Q_general:,.1f} m³/월**")
-        st.write(f"- 월사용 예정량 Q: **{Q_total:,.1f} m³/월**")
-
-        st.write(
-            f"- 적용 기준: **{facility_type} → {threshold:,.0f} m³/월 이상이면 해당**"
-        )
+        st.write(f"- 산업용 사용량 : **{Q_industrial:,.1f} m³/월**")
+        st.write(f"- 일반용 사용량 : **{Q_general:,.1f} m³/월**")
+        st.write(f"- 월사용 예정량 Q : **{Q_total:,.1f} m³/월**")
+        st.write(f"- 적용 기준 : **{threshold:,} m³/월 이상이면 해당**")
 
         if Q_total >= threshold:
-            st.error(
-                f"✅ 월사용 예정량 **{Q_total:,.1f} m³/월** → 기준 **이상**, "
-                "**특정가스사용시설에 해당됩니다.**"
-            )
+            st.error("→ 기준 이상 : **특정가스사용시설 해당**")
         else:
-            st.success(
-                f"✅ 월사용 예정량 **{Q_total:,.1f} m³/월** → 기준 **미만**, "
-                "**특정가스사용시설에 해당되지 않습니다.**"
-            )
+            st.success("→ 기준 미만 : **특정가스사용시설 아님**")
