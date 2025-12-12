@@ -7,11 +7,11 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 제목 — 글자 크기 줄여서 한 줄 표시
+# 제목 — 글자 크기 통일 (h2 스타일)
 # ---------------------------------------------------------
 st.markdown(
     """
-<h2 style="font-size:22px; text-align:center; margin-bottom:10px;">
+<h2 style="font-size:20px; text-align:center; margin-bottom:10px; font-weight:700;">
 대기오염물질배출시설·특정가스사용시설 판별
 </h2>
 """,
@@ -19,64 +19,72 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# 🔥 반드시 가장 먼저 탭을 선언한다
+# 🔥 반드시 먼저 탭 선언
 # ---------------------------------------------------------
 TAB1, TAB2 = st.tabs(["대기오염물질배출시설", "특정가스사용시설"])
 
 # =====================================================================
-# 1) TAB 1 — 대기오염물질배출시설
+# TAB 1 — 대기오염물질배출시설
 # =====================================================================
 with TAB1:
 
-    # 제목 글자 크기 축소 + 한 줄 유지
+    # 제목 글자 크기 통일
     st.markdown(
         """
-<h3 style="font-size:18px; font-weight:600;">
+<h2 style="font-size:20px; font-weight:700;">
 대기오염물질배출시설 판별기준 [대기환경보전법 시행규칙 별표3]
-</h3>
+</h2>
 """,
         unsafe_allow_html=True
     )
 
+    # ================================
+    # 본문 설명
+    # ================================
     st.markdown(
         """
-### **보일러·흡수식 냉ᆞ온수기 및 가스열펌프 기준**
+<h2 style="font-size:20px; font-weight:700;">보일러·흡수식 냉ᆞ온수기 및 가스열펌프 기준</h2>
 
-#### 🔹 1) 보일러 + 흡수식 냉ᆞ온수기  
-- **시간당 증발량 2톤 이상**, 또는  
-- **시간당 열량 1,238,000 kcal/h 이상**  
-
+<h3 style="font-size:18px; font-weight:600;">🔹 1) 보일러 + 흡수식 냉ᆞ온수기 합산 용량</h3>
+- 시간당 증발량 **2톤 이상**, 또는  
+- 시간당 열량 **1,238,000 kcal/h 이상**  
 → **대기오염물질배출시설 해당**
-
----
-
-#### 🔹 2) 가스열펌프  
-다만, 아래의 경우는 제외됨:
-
-- 가스열펌프에서 배출되는 대기오염물질이  
-  **배출허용기준의 30% 미만인 경우**  
-- 기후에너지환경부장관이 정하여 고시하는 기준에 따라  
-  **인증받은 대기오염물질 저감장치를 부착한 경우**
-
----
-
-### **소형 보일러(환경표지 인증) 제외 가능**
-
-- 시간당 증발량 **0.1톤 미만**, 또는  
-- 열량 **61,900 kcal/h 미만**  
-- 「환경기술 및 환경산업 지원법」 제17조에 따른 **환경표지 인증 보일러**
 
 <br>
 
-### <span style="color:red; font-weight:bold">
-※ 지자체(환경청 또는 시·도지사)가 인정하는 경우에만 용량 산정에서 제외 가능
-</span>
+<h3 style="font-size:18px; font-weight:600;">🔹 2) 가스열펌프</h3>
 
+- 가스열펌프에서 배출되는 대기오염물질이 **배출허용기준의 30% 미만인 경우**  
+- 기후에너지환경부장관 고시 기준에 따라 **인증받은 대기오염물질 저감장치를 부착한 경우**
+
+<br>
+
+<h2 style="font-size:20px; font-weight:700;">※ 소형 보일러(환경표지 인증) 제외 가능</h2>
+
+- 시간당 증발량 **0.1톤 미만**, 또는  
+- 열량 **61,900 kcal/h 미만**  
+- 「환경기술 및 환경산업 지원법」 제17조에 따라 **환경표지인증을 받은 보일러**
+
+<br>
+
+<h3 style="color:red; font-weight:700;">
+※ "지자체(환경청 또는 시·도지사)가 인정하는 경우에만" 용량 산정에서 제외 가능
+</h3>
+
+<br><br>
 """,
         unsafe_allow_html=True
     )
 
-    st.markdown("### 1) 캐스케이드 용량 입력 (최대 가스소비량 기준)")
+    # ================================
+    # 용량 입력
+    # ================================
+    st.markdown(
+        """
+<h2 style="font-size:20px; font-weight:700;">🔹 캐스케이드 용량 입력 (최대 가스소비량 기준)</h2>
+""",
+        unsafe_allow_html=True
+    )
 
     # 모델별 용량
     NPW_CAP = 50_000
@@ -87,7 +95,7 @@ with TAB1:
 
     with colA:
         ncb_count = st.number_input("NCB790-45LS 대수", min_value=0, step=1, value=0)
-        ncb_exclude = st.checkbox("용량산정 제외 (지자체 허가 완료)", key="ncb_ex")
+        ncb_exclude = st.checkbox("용량산정 제외 (지자체 승인 완료)", key="ncb_ex")
 
         npw_count = st.number_input("NPW-48K(KD) 대수", min_value=0, step=1, value=0)
         nfb_count = st.number_input("NFB790-100LS 대수", min_value=0, step=1, value=0)
@@ -109,7 +117,13 @@ with TAB1:
         nfb_count * NFB_CAP
     )
 
-    st.markdown("### 2) 타 장비 합산 용량 입력")
+    st.markdown(
+        """
+<h2 style="font-size:20px; font-weight:700;">🔹 타 장비 합산 용량 입력</h2>
+""",
+        unsafe_allow_html=True
+    )
+
     other_capacity = st.number_input(
         "타 장비 합산용량 (kcal/h)",
         min_value=0.0,
@@ -118,8 +132,13 @@ with TAB1:
         value=0.0,
     )
 
-    # 타장비 문구 변경됨
-    st.markdown("**타장비 : 캐스케이드 제품 외 보일러, 온수기, 흡수식·냉온수기 등**")
+    # 타장비 문구 수정 + ※ 추가
+    st.markdown(
+        """
+<h3 style="font-size:16px; font-weight:600;">※ 타장비 : 캐스케이드 제품 외 보일러, 온수기, 흡수식·냉온수기 등</h3>
+""",
+        unsafe_allow_html=True
+    )
 
     THRESHOLD_AIR = 1_238_000
 
@@ -147,7 +166,12 @@ with TAB1:
 # =====================================================================
 with TAB2:
 
-    st.subheader("특정가스사용시설 판별")
+    st.markdown(
+        """
+<h2 style="font-size:20px; font-weight:700;">특정가스사용시설 판별</h2>
+""",
+        unsafe_allow_html=True
+    )
 
     st.markdown(
         """
