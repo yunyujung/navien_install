@@ -1,5 +1,13 @@
 import streamlit as st
 
+st.set_page_config(
+    page_title="대기오염물질배출시설·특정가스사용시설 판별",
+    page_icon="🏭",
+    layout="centered"
+)
+
+import streamlit as st
+
 # 페이지 설정
 st.set_page_config(
     page_title="대기오염물질배출시설·특정가스사용시설 판별",
@@ -245,3 +253,4 @@ Q = \\frac{(A \\times 240) + (B \\times 90)}{11,000}
             st.error("→ 기준 이상 : **특정가스사용시설 해당**")
         else:
             st.success("→ 기준 미만 : **특정가스사용시설 아님**")
+
