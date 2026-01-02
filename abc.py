@@ -10,16 +10,13 @@ st.set_page_config(
 )
 
 # ----------------------------------------
-# 메인 제목 + 버전 표시
+# 메인 제목
 # ----------------------------------------
 st.markdown(
     """
 <h1 style="font-size:30px; text-align:center; margin-bottom:5px; font-weight:900;">
 대기오염물질배출시설·특정가스사용시설 판별
 </h1>
-<p style="text-align:center; font-size:13px; color:gray; margin-top:0;">
-버전: <b>v2026-01-02-3 (디버그용)</b>
-</p>
 """,
     unsafe_allow_html=True
 )
@@ -77,13 +74,10 @@ with TAB1:
         unsafe_allow_html=True
     )
 
-    # -------------------------------
-    # 구분선
-    # -------------------------------
     st.write("---")
 
     # =========================================
-    # 🔹 캐스케이드 용량 입력 (최대 가스소비량 기준)
+    # 🔹 캐스케이드 용량 입력
     # =========================================
     st.markdown(
         """
@@ -92,7 +86,6 @@ with TAB1:
         unsafe_allow_html=True
     )
 
-    # 설비별 용량
     NPW_CAP = 50_000
     NCB_CAP = 47_500
     NFB_CAP = 105_500
@@ -115,7 +108,6 @@ with TAB1:
 """
         )
 
-    # NCB 제외 여부 반영
     NCB_effective = 0 if ncb_exclude else NCB_CAP
 
     cascade_capacity = (
@@ -167,16 +159,6 @@ with TAB1:
 # =====================================================================
 with TAB2:
 
-    # ✅ 디버그용 문구 (이게 보여야 '새 코드' 맞음)
-    st.markdown(
-        """
-<p style="color:red; font-weight:700;">
-※ 이 문구(빨간 글씨)가 보이면, 특정가스사용시설 탭은 최신 버전 코드가 적용된 상태입니다.
-</p>
-""",
-        unsafe_allow_html=True
-    )
-
     st.markdown(
         """
 <h2 style="font-size:20px; font-weight:700;">특정가스사용시설 판별</h2>
@@ -205,8 +187,8 @@ with TAB2:
 - B(비산업용) : 산업용이 아닌 연소기 명판 가스소비량 합계 (㎉/h)  
 
 ※ 가정용 연소기 가스소비량은 제외  
-※ A 산업용 : 해당 연소기를 통해 직접 제품을 생산, 판매하는 경우 
-※ B 비산업용 : 그 외 모든 연소기 → 대부분 현장에 해당 
+※ A 산업용 : 해당 연소기를 통해 직접 제품을 생산·판매하는 경우  
+※ B 비산업용 : 그 외 모든 연소기 (대부분 현장 해당)  
 
 ---
 
@@ -231,7 +213,6 @@ with TAB2:
     colA, colB = st.columns([1, 2])
 
     with colA:
-        # 🔹 A/B 라벨 변경 (요청하신 그대로)
         industrial = st.number_input(
             "산업용 (A) kcal/h",
             min_value=0.0,
@@ -248,13 +229,11 @@ with TAB2:
         )
 
     with colB:
-        # 🔹 안내 문구 변경
         st.write("상업용 : A kcal/h × 240시간 ÷ 11,000 kcal/m³")
         st.write("비산업용 : B kcal/h × 90시간 ÷ 11,000 kcal/m³")
 
     is_protect = st.checkbox("제1종 보호시설인 경우 (1,000㎥ 이상 기준 적용)")
 
-    # 월사용량 계산
     Q_industrial = industrial * 240 / 11000
     Q_general = general * 90 / 11000
     Q_total = Q_industrial + Q_general
@@ -268,45 +247,37 @@ with TAB2:
 
     st.write("---")
 
-    # 특정가스사용시설 기본 판별 기준
     threshold = 1000 if is_protect else 2000
     st.write(f"✔ 적용 기준 : **{threshold:,} m³/월 이상이면 특정가스사용시설 해당**")
 
     if st.button("특정가스사용시설 판별하기"):
         st.markdown("#### 🔎 판정 결과")
 
-        # ① 특정가스사용시설 여부
         if Q_total >= threshold:
             st.error("👉 기준 이상 : **특정가스사용시설 해당**")
         else:
             st.success("👉 기준 미만 : **특정가스사용시설 아님**")
 
-        # ② 안전관리자 선임 안내
         st.markdown("##### 📌 안전관리자 선임 안내")
 
-        # 4,000 m³/월 초과 → 총괄자 + 책임자
         if Q_total > 4000:
             st.warning(
                 "월사용 예정량 합계가 **4,000 m³/월 초과**이므로,  \n"
                 "**→ 안전관리총괄자 + 안전관리책임자 선임 필요**"
             )
         else:
-            # 제1종 보호시설인 경우 (1,000 ~ 4,000 m³/월 이하)
             if is_protect and Q_total >= 1000:
                 st.info(
                     "제1종 보호시설이며 월사용 예정량이 **1,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
                     "**→ 안전관리총괄자 선임 필요**"
                 )
-            # 일반 시설 (2,000 ~ 4,000 m³/월 이하)
             elif (not is_protect) and Q_total >= 2000:
                 st.info(
                     "월사용 예정량이 **2,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
                     "**→ 안전관리총괄자 선임 필요**"
                 )
-            # 그 외 구간 → 선임 대상 아님
             else:
                 st.success(
                     "월사용 예정량 합계 기준에 따라  \n"
                     "**→ 안전관리총괄자·안전관리책임자 선임 대상 구간에 해당하지 않습니다.**"
                 )
-
