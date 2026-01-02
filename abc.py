@@ -18,7 +18,7 @@ st.markdown(
 대기오염물질배출시설·특정가스사용시설 판별
 </h1>
 <p style="text-align:center; font-size:13px; color:gray; margin-top:0;">
-버전: v2026-01-02-2
+버전: <b>v2026-01-02-3 (디버그용)</b>
 </p>
 """,
     unsafe_allow_html=True
@@ -78,7 +78,7 @@ with TAB1:
     )
 
     # -------------------------------
-    # 🔥 구분선
+    # 구분선
     # -------------------------------
     st.write("---")
 
@@ -167,6 +167,16 @@ with TAB1:
 # =====================================================================
 with TAB2:
 
+    # ✅ 디버그용 문구 (이게 보여야 '새 코드' 맞음)
+    st.markdown(
+        """
+<p style="color:red; font-weight:700;">
+※ 이 문구(빨간 글씨)가 보이면, 특정가스사용시설 탭은 최신 버전 코드가 적용된 상태입니다.
+</p>
+""",
+        unsafe_allow_html=True
+    )
+
     st.markdown(
         """
 <h2 style="font-size:20px; font-weight:700;">특정가스사용시설 판별</h2>
@@ -221,7 +231,7 @@ with TAB2:
     colA, colB = st.columns([1, 2])
 
     with colA:
-        # 🔹 A/B 라벨 변경
+        # 🔹 A/B 라벨 변경 (요청하신 그대로)
         industrial = st.number_input(
             "산업용 (A) kcal/h",
             min_value=0.0,
@@ -292,4 +302,10 @@ with TAB2:
                 st.info(
                     "월사용 예정량이 **2,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
                     "**→ 안전관리총괄자 선임 필요**"
+                )
+            # 그 외 구간 → 선임 대상 아님
+            else:
+                st.success(
+                    "월사용 예정량 합계 기준에 따라  \n"
+                    "**→ 안전관리총괄자·안전관리책임자 선임 대상 구간에 해당하지 않습니다.**"
                 )
