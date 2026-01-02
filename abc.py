@@ -10,13 +10,16 @@ st.set_page_config(
 )
 
 # ----------------------------------------
-# 메인 제목
+# 메인 제목 + 버전 표시
 # ----------------------------------------
 st.markdown(
     """
-<h1 style="font-size:30px; text-align:center; margin-bottom:10px; font-weight:900;">
+<h1 style="font-size:30px; text-align:center; margin-bottom:5px; font-weight:900;">
 대기오염물질배출시설·특정가스사용시설 판별
 </h1>
+<p style="text-align:center; font-size:13px; color:gray; margin-top:0;">
+버전: v2026-01-02-2
+</p>
 """,
     unsafe_allow_html=True
 )
@@ -75,7 +78,7 @@ with TAB1:
     )
 
     # -------------------------------
-    # 🔥 여기 줄 구분 1개만 추가
+    # 🔥 구분선
     # -------------------------------
     st.write("---")
 
@@ -89,6 +92,7 @@ with TAB1:
         unsafe_allow_html=True
     )
 
+    # 설비별 용량
     NPW_CAP = 50_000
     NCB_CAP = 47_500
     NFB_CAP = 105_500
@@ -111,6 +115,7 @@ with TAB1:
 """
         )
 
+    # NCB 제외 여부 반영
     NCB_effective = 0 if ncb_exclude else NCB_CAP
 
     cascade_capacity = (
@@ -216,6 +221,7 @@ with TAB2:
     colA, colB = st.columns([1, 2])
 
     with colA:
+        # 🔹 A/B 라벨 변경
         industrial = st.number_input(
             "산업용 (A) kcal/h",
             min_value=0.0,
@@ -232,11 +238,13 @@ with TAB2:
         )
 
     with colB:
+        # 🔹 안내 문구 변경
         st.write("상업용 : A kcal/h × 240시간 ÷ 11,000 kcal/m³")
         st.write("비산업용 : B kcal/h × 90시간 ÷ 11,000 kcal/m³")
 
     is_protect = st.checkbox("제1종 보호시설인 경우 (1,000㎥ 이상 기준 적용)")
 
+    # 월사용량 계산
     Q_industrial = industrial * 240 / 11000
     Q_general = general * 90 / 11000
     Q_total = Q_industrial + Q_general
@@ -250,40 +258,38 @@ with TAB2:
 
     st.write("---")
 
+    # 특정가스사용시설 기본 판별 기준
     threshold = 1000 if is_protect else 2000
     st.write(f"✔ 적용 기준 : **{threshold:,} m³/월 이상이면 특정가스사용시설 해당**")
 
     if st.button("특정가스사용시설 판별하기"):
         st.markdown("#### 🔎 판정 결과")
 
+        # ① 특정가스사용시설 여부
         if Q_total >= threshold:
             st.error("👉 기준 이상 : **특정가스사용시설 해당**")
         else:
             st.success("👉 기준 미만 : **특정가스사용시설 아님**")
 
-        # ================================
-        # 📌 안전관리자 선임 추가 안내
-        # ================================
+        # ② 안전관리자 선임 안내
         st.markdown("##### 📌 안전관리자 선임 안내")
 
-        # 4,000 m³/월 초과 구간
+        # 4,000 m³/월 초과 → 총괄자 + 책임자
         if Q_total > 4000:
             st.warning(
                 "월사용 예정량 합계가 **4,000 m³/월 초과**이므로,  \n"
                 "**→ 안전관리총괄자 + 안전관리책임자 선임 필요**"
             )
         else:
-            # 제1종 보호시설인 경우 (기준 1,000 m³/월)
-            if is_protect:
-                if Q_total >= 1000:
-                    st.info(
-                        "제1종 보호시설이며 월사용 예정량이 **1,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
-                        "**→ 안전관리총괄자 선임 필요**"
-                    )
-            # 일반 시설 (기준 2,000 m³/월)
-            else:
-                if Q_total >= 2000:
-                    st.info(
-                        "월사용 예정량이 **2,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
-                        "**→ 안전관리총괄자 선임 필요**"
-                    )
+            # 제1종 보호시설인 경우 (1,000 ~ 4,000 m³/월 이하)
+            if is_protect and Q_total >= 1000:
+                st.info(
+                    "제1종 보호시설이며 월사용 예정량이 **1,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
+                    "**→ 안전관리총괄자 선임 필요**"
+                )
+            # 일반 시설 (2,000 ~ 4,000 m³/월 이하)
+            elif (not is_protect) and Q_total >= 2000:
+                st.info(
+                    "월사용 예정량이 **2,000 ~ 4,000 m³/월 이하** 구간에 해당하므로,  \n"
+                    "**→ 안전관리총괄자 선임 필요**"
+                )
